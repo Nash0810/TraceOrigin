@@ -1,0 +1,42 @@
+# Binaries
+bin/
+dist/
+*.o
+*.a
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+*.so
+*.dylib
+*.exe
+
+# Go
+go.sum
+vendor/
+
+# Logs
+*.log
+
+# eBPF
+vmlinux.h
+*.bpf.o
+
+# Backup
+plan.txt.bak
+*.backup
+
+
+plan.txt
+*.md
+!README.md
+!ARCHITECTURE.md
