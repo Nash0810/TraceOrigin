@@ -1,0 +1,23 @@
+[package]
+name = "trace-origin-rust"
+version = "0.1.0"
+edition = "2021"
+authors = ["TraceOrigin Team"]
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1", features = ["full"] }
+axum = "0.6"
+log = "0.4"
+env_logger = "0.10"
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "extraction_bench"
+harness = false
+
+[profile.release]
+opt-level = 3

@@ -1,0 +1,75 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.4",
+  "serialNumber": "urn:uuid:trace-origin-pytest-python",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2025-12-17T10:00:25Z",
+    "tools": [
+      {
+        "vendor": "TraceOrigin",
+        "name": "Manifest Analyzer",
+        "version": "0.1.0"
+      }
+    ],
+    "component": {
+      "type": "application",
+      "name": "Python Test App",
+      "version": "1.0.0"
+    }
+  },
+  "components": [
+    {
+      "type": "library",
+      "name": "requests",
+      "version": "2.28.1",
+      "purl": "pkg:pypi/requests@2.28.1",
+      "properties": [
+        {
+          "name": "verified",
+          "value": "true"
+        },
+        {
+          "name": "source_registry",
+          "value": "PyPI"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "flask",
+      "version": "2.2.2",
+      "purl": "pkg:pypi/flask@2.2.2",
+      "properties": [
+        {
+          "name": "verified",
+          "value": "true"
+        },
+        {
+          "name": "source_registry",
+          "value": "PyPI"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "flak",
+      "version": "2.1.0",
+      "purl": "pkg:pypi/flak@2.1.0",
+      "properties": [
+        {
+          "name": "verified",
+          "value": "false"
+        },
+        {
+          "name": "verification_status",
+          "value": "typosquatting_suspected"
+        },
+        {
+          "name": "source_registry",
+          "value": "non-standard"
+        }
+      ]
+    }
+  ]
+}

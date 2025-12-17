@@ -1,0 +1,512 @@
+package tests
+
+import (
+	"encoding/json"
+	"io/ioutil"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/Nash0810/TraceOrigin/pkg/correlator"
+	"github.com/Nash0810/TraceOrigin/pkg/manifest"
+	"github.com/Nash0810/TraceOrigin/pkg/sbom"
+	"github.com/Nash0810/TraceOrigin/pkg/version"
+)
+
+// TestPythonManifestAnalysis validates Python requirements.txt processing
+func TestPythonManifestAnalysis(t *testing.T) {
+	// Load manifest
+	manifestPath := filepath.Join("fixtures", "manifests", "requirements.txt")
+	declaredPkgs, err := manifest.ParseRequirements(manifestPath)
+	if err != nil {
+		t.Fatalf("Failed to parse requirements.txt: %v", err)
+	}
+
+	if len(declaredPkgs) < 5 {
+		t.Errorf("Expected at least 5 packages, got %d", len(declaredPkgs))
+	}
+
+	// Verify specific packages exist
+	packageMap := make(map[string]*manifest.DeclaredPackage)
+	for _, pkg := range declaredPkgs {
+		packageMap[pkg.Name] = pkg
+	}
+
+	expectedPkgs := []string{"requests", "flask", "numpy", "pandas", "sqlalchemy"}
+	for _, expected := range expectedPkgs {
+		if _, exists := packageMap[expected]; !exists {
+			t.Errorf("Expected package %s not found in manifest", expected)
+		}
+	}
+
+	// Verify version pinning
+	if pkg, ok := packageMap["requests"]; ok {
+		if pkg.DeclaredVersion != "2.28.1" {
+			t.Errorf("requests version mismatch: expected 2.28.1, got %s", pkg.DeclaredVersion)
+		}
+	}
+}
+
+// TestNodePackageJsonAnalysis validates Node package.json processing
+func TestNodePackageJsonAnalysis(t *testing.T) {
+	manifestPath := filepath.Join("fixtures", "manifests", "package.json")
+	declaredPkgs, err := manifest.ParsePackageJson(manifestPath)
+	if err != nil {
+		t.Fatalf("Failed to parse package.json: %v", err)
+	}
+
+	if len(declaredPkgs) < 5 {
+		t.Errorf("Expected at least 5 packages, got %d", len(declaredPkgs))
+	}
+
+	packageMap := make(map[string]*manifest.DeclaredPackage)
+	for _, pkg := range declaredPkgs {
+		packageMap[pkg.Name] = pkg
+	}
+
+	if pkg, ok := packageMap["express"]; ok {
+		if pkg.DeclaredVersion != "4.18.2" {
+			t.Errorf("express version mismatch: expected 4.18.2, got %s", pkg.DeclaredVersion)
+		}
+	}
+}
+
+// TestTraceLogParsing validates trace log event parsing
+func TestTraceLogParsing(t *testing.T) {
+	traceLogPath := filepath.Join("fixtures", "trace_logs", "python_install_trace.json")
+
+	data, err := ioutil.ReadFile(traceLogPath)
+	if err != nil {
+		t.Fatalf("Failed to read trace log: %v", err)
+	}
+
+	var events []map[string]interface{}
+	if err := json.Unmarshal(data, &events); err != nil {
+		t.Fatalf("Failed to parse trace log JSON: %v", err)
+	}
+
+	if len(events) < 5 {
+		t.Errorf("Expected at least 5 events, got %d", len(events))
+	}
+
+	// Verify event types
+	eventTypes := make(map[string]int)
+	for _, event := range events {
+		if eventType, ok := event["event_type"].(string); ok {
+			eventTypes[eventType]++
+		}
+	}
+
+	expectedTypes := []string{"process_start", "file_write", "http_request", "process_end"}
+	for _, expected := range expectedTypes {
+		if _, exists := eventTypes[expected]; !exists {
+			t.Errorf("Expected event type %s not found in trace log", expected)
+		}
+	}
+}
+
+// TestVersionExtraction validates version extraction from package files
+func TestVersionExtraction(t *testing.T) {
+	extractor := &version.Extractor{}
+
+	// Test Python version extraction
+	testCases := []struct {
+		filename string
+		expected string
+		manager  string
+	}{
+		{"requests-2.28.1-py3-none-any.whl", "2.28.1", "python"},
+		{"flask-2.2.2-py3-none-any.whl", "2.2.2", "python"},
+		{"package.json", "1.0.0", "nodejs"},
+	}
+
+	for _, tc := range testCases {
+		detected := extractor.DetectPackageManager(tc.filename)
+		if detected != tc.manager {
+			t.Errorf("Package manager detection failed: expected %s, got %s", tc.manager, detected)
+		}
+	}
+}
+
+// TestCorrelationEngine validates dependency chain correlation
+func TestCorrelationEngine(t *testing.T) {
+	engine := correlator.NewEngine()
+
+	// Add sample packages to declared list
+	engine.AddDeclaredPackage(&manifest.DeclaredPackage{
+		Name:             "requests",
+		DeclaredVersion:  "2.28.1",
+		PackageManager:   "python",
+		ConstraintType:   "==",
+	})
+
+	engine.AddDeclaredPackage(&manifest.DeclaredPackage{
+		Name:             "flask",
+		DeclaredVersion:  "2.2.2",
+		PackageManager:   "python",
+		ConstraintType:   "==",
+	})
+
+	// Simulate HTTP events
+	engine.AddHTTPEvent(&correlator.HTTPEvent{
+		URL:       "https://files.pythonhosted.org/packages/requests-2.28.1-py3-none-any.whl",
+		Method:    "GET",
+		Status:    200,
+		Timestamp: "2025-12-17T10:00:07Z",
+	})
+
+	engine.AddHTTPEvent(&correlator.HTTPEvent{
+		URL:       "https://files.pythonhosted.org/packages/flask-2.2.2-py3-none-any.whl",
+		Method:    "GET",
+		Status:    200,
+		Timestamp: "2025-12-17T10:00:08Z",
+	})
+
+	// Build chains and verify correlation
+	chains := engine.BuildChains()
+	if len(chains) < 2 {
+		t.Errorf("Expected at least 2 dependency chains, got %d", len(chains))
+	}
+}
+
+// TestSBOMGeneration validates CycloneDX SBOM generation
+func TestSBOMGeneration(t *testing.T) {
+	engine := correlator.NewEngine()
+
+	// Add packages
+	engine.AddDeclaredPackage(&manifest.DeclaredPackage{
+		Name:            "requests",
+		DeclaredVersion: "2.28.1",
+		PackageManager:  "python",
+	})
+
+	// Build chains
+	chains := engine.BuildChains()
+
+	// Generate SBOM
+	generator := &sbom.CycloneDXGenerator{}
+	sbomDoc, err := generator.GenerateCycloneDX(chains, nil)
+	if err != nil {
+		t.Fatalf("Failed to generate SBOM: %v", err)
+	}
+
+	// Validate SBOM structure
+	if sbomDoc.BomFormat != "CycloneDX" {
+		t.Errorf("Invalid BOM format: expected CycloneDX, got %s", sbomDoc.BomFormat)
+	}
+
+	if sbomDoc.SpecVersion != "1.4" {
+		t.Errorf("Invalid spec version: expected 1.4, got %s", sbomDoc.SpecVersion)
+	}
+
+	if sbomDoc.Version != 1 {
+		t.Errorf("Invalid version: expected 1, got %d", sbomDoc.Version)
+	}
+}
+
+// TestSPDXGeneration validates SPDX format SBOM generation
+func TestSPDXGeneration(t *testing.T) {
+	engine := correlator.NewEngine()
+
+	// Add packages
+	engine.AddDeclaredPackage(&manifest.DeclaredPackage{
+		Name:            "serde",
+		DeclaredVersion: "1.0.0",
+		PackageManager:  "rust",
+	})
+
+	chains := engine.BuildChains()
+
+	// Generate SPDX SBOM
+	generator := &sbom.SPDXGenerator{}
+	spdxDoc, err := generator.GenerateSPDX(chains, nil)
+	if err != nil {
+		t.Fatalf("Failed to generate SPDX: %v", err)
+	}
+
+	// Validate SPDX structure
+	if spdxDoc.SpdxVersion != "SPDX-2.3" {
+		t.Errorf("Invalid SPDX version: expected SPDX-2.3, got %s", spdxDoc.SpdxVersion)
+	}
+
+	if spdxDoc.CreationInfo.Created == "" {
+		t.Errorf("Missing SPDX creation timestamp")
+	}
+}
+
+// TestVersionMismatchDetection validates mismatch detection
+func TestVersionMismatchDetection(t *testing.T) {
+	engine := correlator.NewEngine()
+
+	// Add declared packages
+	engine.AddDeclaredPackage(&manifest.DeclaredPackage{
+		Name:            "requests",
+		DeclaredVersion: "2.28.1",
+		PackageManager:  "python",
+		ConstraintType:  "==",
+	})
+
+	engine.AddDeclaredPackage(&manifest.DeclaredPackage{
+		Name:            "flask",
+		DeclaredVersion: "2.2.2",
+		PackageManager:  "python",
+		ConstraintType:  "==",
+	})
+
+	// Add mismatched HTTP event
+	engine.AddHTTPEvent(&correlator.HTTPEvent{
+		URL:       "https://files.pythonhosted.org/packages/flask-2.1.0-py3-none-any.whl",
+		Method:    "GET",
+		Status:    200,
+		Timestamp: "2025-12-17T10:00:08Z",
+	})
+
+	chains := engine.BuildChains()
+	mismatches := engine.DetectVersionMismatches(chains)
+
+	// Should detect mismatch
+	if len(mismatches) == 0 {
+		t.Errorf("Expected version mismatch detection, but none found")
+	}
+}
+
+// TestTyposquattingDetection validates typosquatting detection
+func TestTyposquattingDetection(t *testing.T) {
+	engine := correlator.NewEngine()
+
+	// Add legitimate package
+	engine.AddDeclaredPackage(&manifest.DeclaredPackage{
+		Name:            "flask",
+		DeclaredVersion: "2.2.2",
+		PackageManager:  "python",
+	})
+
+	// Add typosquatted package (different from declared)
+	engine.AddDeclaredPackage(&manifest.DeclaredPackage{
+		Name:            "flak",
+		DeclaredVersion: "2.1.0",
+		PackageManager:  "python",
+	})
+
+	// Add HTTP event from suspicious domain
+	engine.AddHTTPEvent(&correlator.HTTPEvent{
+		URL:       "https://suspicious-mirror.com/packages/flak-2.1.0-py3-none-any.whl",
+		Method:    "GET",
+		Status:    200,
+		Timestamp: "2025-12-17T10:00:20Z",
+	})
+
+	chains := engine.BuildChains()
+	mismatches := engine.DetectVersionMismatches(chains)
+
+	// Verify suspicious activity detection
+	hasSuspiciousMarker := false
+	for _, mismatch := range mismatches {
+		if mismatch.IsSuspicious {
+			hasSuspiciousMarker = true
+			break
+		}
+	}
+
+	if !hasSuspiciousMarker {
+		t.Errorf("Expected suspicious activity detection for typosquatting scenario")
+	}
+}
+
+// TestIntegrationWorkflow validates end-to-end workflow
+func TestIntegrationWorkflow(t *testing.T) {
+	// 1. Parse manifest
+	manifestPath := filepath.Join("fixtures", "manifests", "requirements.txt")
+	declaredPkgs, err := manifest.ParseRequirements(manifestPath)
+	if err != nil {
+		t.Fatalf("Failed to parse manifest: %v", err)
+	}
+
+	// 2. Load trace log
+	traceLogPath := filepath.Join("fixtures", "trace_logs", "python_install_trace.json")
+	data, err := ioutil.ReadFile(traceLogPath)
+	if err != nil {
+		t.Fatalf("Failed to read trace log: %v", err)
+	}
+
+	var events []map[string]interface{}
+	if err := json.Unmarshal(data, &events); err != nil {
+		t.Fatalf("Failed to parse trace log: %v", err)
+	}
+
+	// 3. Build correlation engine
+	engine := correlator.NewEngine()
+	for _, pkg := range declaredPkgs {
+		engine.AddDeclaredPackage(pkg)
+	}
+
+	// 4. Extract HTTP events from trace
+	for _, event := range events {
+		if eventType, ok := event["event_type"].(string); ok && eventType == "http_request" {
+			if url, ok := event["url"].(string); ok {
+				engine.AddHTTPEvent(&correlator.HTTPEvent{
+					URL:       url,
+					Method:    "GET",
+					Status:    200,
+					Timestamp: event["timestamp"].(string),
+				})
+			}
+		}
+	}
+
+	// 5. Build chains
+	chains := engine.BuildChains()
+	if len(chains) == 0 {
+		t.Errorf("Failed to build dependency chains")
+	}
+
+	// 6. Generate SBOM
+	generator := &sbom.CycloneDXGenerator{}
+	sbomDoc, err := generator.GenerateCycloneDX(chains, nil)
+	if err != nil {
+		t.Fatalf("Failed to generate SBOM: %v", err)
+	}
+
+	// 7. Validate output
+	if sbomDoc.BomFormat != "CycloneDX" {
+		t.Errorf("Invalid SBOM format")
+	}
+
+	if len(sbomDoc.Components) == 0 {
+		t.Errorf("No components in generated SBOM")
+	}
+
+	t.Logf("Integration test completed successfully: %d packages processed, %d components in SBOM",
+		len(declaredPkgs), len(sbomDoc.Components))
+}
+
+// TestCLIAnalyzeCommand validates analyze command workflow
+func TestCLIAnalyzeCommand(t *testing.T) {
+	// Simulate CLI analyze command
+	manifestPath := filepath.Join("fixtures", "manifests", "requirements.txt")
+	tracePath := filepath.Join("fixtures", "trace_logs", "python_install_trace.json")
+
+	// Load and correlate
+	declaredPkgs, err := manifest.ParseRequirements(manifestPath)
+	if err != nil {
+		t.Fatalf("Failed to parse manifest: %v", err)
+	}
+
+	data, err := ioutil.ReadFile(tracePath)
+	if err != nil {
+		t.Fatalf("Failed to read trace log: %v", err)
+	}
+
+	var events []map[string]interface{}
+	if err := json.Unmarshal(data, &events); err != nil {
+		t.Fatalf("Failed to parse trace log: %v", err)
+	}
+
+	engine := correlator.NewEngine()
+	for _, pkg := range declaredPkgs {
+		engine.AddDeclaredPackage(pkg)
+	}
+
+	for _, event := range events {
+		if eventType, ok := event["event_type"].(string); ok && eventType == "http_request" {
+			if url, ok := event["url"].(string); ok {
+				engine.AddHTTPEvent(&correlator.HTTPEvent{
+					URL:       url,
+					Method:    "GET",
+					Status:    200,
+					Timestamp: event["timestamp"].(string),
+				})
+			}
+		}
+	}
+
+	chains := engine.BuildChains()
+	mismatches := engine.DetectVersionMismatches(chains)
+
+	// Verify analysis results
+	if len(chains) == 0 {
+		t.Errorf("No dependency chains built")
+	}
+
+	t.Logf("Analyze command test: %d chains, %d mismatches", len(chains), len(mismatches))
+}
+
+// TestCLISBOMCommand validates sbom command workflow
+func TestCLISBOMCommand(t *testing.T) {
+	// Simulate CLI sbom command
+	manifestPath := filepath.Join("fixtures", "manifests", "requirements.txt")
+	tracePath := filepath.Join("fixtures", "trace_logs", "python_install_trace.json")
+
+	// Load data
+	declaredPkgs, err := manifest.ParseRequirements(manifestPath)
+	if err != nil {
+		t.Fatalf("Failed to parse manifest: %v", err)
+	}
+
+	data, err := ioutil.ReadFile(tracePath)
+	if err != nil {
+		t.Fatalf("Failed to read trace log: %v", err)
+	}
+
+	var events []map[string]interface{}
+	if err := json.Unmarshal(data, &events); err != nil {
+		t.Fatalf("Failed to parse trace log: %v", err)
+	}
+
+	// Build SBOM
+	engine := correlator.NewEngine()
+	for _, pkg := range declaredPkgs {
+		engine.AddDeclaredPackage(pkg)
+	}
+
+	for _, event := range events {
+		if eventType, ok := event["event_type"].(string); ok && eventType == "http_request" {
+			if url, ok := event["url"].(string); ok {
+				engine.AddHTTPEvent(&correlator.HTTPEvent{
+					URL:       url,
+					Method:    "GET",
+					Status:    200,
+					Timestamp: event["timestamp"].(string),
+				})
+			}
+		}
+	}
+
+	chains := engine.BuildChains()
+
+	// Generate CycloneDX SBOM
+	generator := &sbom.CycloneDXGenerator{}
+	sbomDoc, err := generator.GenerateCycloneDX(chains, nil)
+	if err != nil {
+		t.Fatalf("Failed to generate CycloneDX SBOM: %v", err)
+	}
+
+	// Write to temp file
+	tmpFile, err := ioutil.TempFile("", "sbom_*.json")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	if err := sbomDoc.WriteJSON(tmpFile.Name()); err != nil {
+		t.Fatalf("Failed to write SBOM: %v", err)
+	}
+
+	// Verify file was written
+	if info, err := os.Stat(tmpFile.Name()); err != nil || info.Size() == 0 {
+		t.Errorf("SBOM file not properly written")
+	}
+
+	// Also test SPDX format
+	spdxGen := &sbom.SPDXGenerator{}
+	spdxDoc, err := spdxGen.GenerateSPDX(chains, nil)
+	if err != nil {
+		t.Fatalf("Failed to generate SPDX SBOM: %v", err)
+	}
+
+	if spdxDoc == nil {
+		t.Errorf("SPDX SBOM generation returned nil")
+	}
+
+	t.Logf("SBOM command test passed: CycloneDX and SPDX formats generated")
+}

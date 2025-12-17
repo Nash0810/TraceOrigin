@@ -1,0 +1,52 @@
+[
+  {
+    "timestamp": "2025-12-17T12:00:01Z",
+    "event_type": "process_start",
+    "pid": 3456,
+    "name": "go",
+    "cmdline": "go mod download",
+    "uid": 1000
+  },
+  {
+    "timestamp": "2025-12-17T12:00:05Z",
+    "event_type": "http_request",
+    "pid": 3456,
+    "url": "https://proxy.golang.org/github.com/cilium/ebpf/@v/v0.11.0.mod",
+    "method": "GET",
+    "status": 200,
+    "response_size": 1024
+  },
+  {
+    "timestamp": "2025-12-17T12:00:06Z",
+    "event_type": "http_request",
+    "pid": 3456,
+    "url": "https://proxy.golang.org/github.com/cilium/ebpf/@v/v0.11.0.zip",
+    "method": "GET",
+    "status": 200,
+    "response_size": 524288
+  },
+  {
+    "timestamp": "2025-12-17T12:00:08Z",
+    "event_type": "file_write",
+    "pid": 3456,
+    "path": "/root/go/pkg/mod/github.com/cilium/ebpf@v0.11.0/go.mod",
+    "size": 512,
+    "checksum": "sha256:abc123"
+  },
+  {
+    "timestamp": "2025-12-17T12:00:10Z",
+    "event_type": "http_request",
+    "pid": 3456,
+    "url": "https://proxy.golang.org/github.com/spf13/cobra/@v/v1.6.1.mod",
+    "method": "GET",
+    "status": 200,
+    "response_size": 768
+  },
+  {
+    "timestamp": "2025-12-17T12:00:11Z",
+    "event_type": "process_end",
+    "pid": 3456,
+    "exit_code": 0,
+    "duration_seconds": 10
+  }
+]

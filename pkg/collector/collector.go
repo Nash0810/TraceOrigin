@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/ringbuf"
@@ -25,6 +24,7 @@ const (
 	EventTypeFileOpen EventType = 3
 	EventTypeFileWrite EventType = 4
 	EventTypeLogWrite EventType = 5
+	EventTypeHTTP     EventType = 6
 )
 
 // ExecEvent - Process execution event
@@ -74,6 +74,18 @@ type LogEvent struct {
 	EventType  string    `json:"event_type"`
 }
 
+// HTTPEvent - HTTP request event
+type HTTPEvent struct {
+	PID         uint32    `json:"pid"`
+	CgroupID    uint64    `json:"cgroup_id"`
+	Comm        string    `json:"comm"`
+	URL         string    `json:"url"`
+	Host        string    `json:"host"`
+	Method      uint32    `json:"method"`
+	Timestamp   uint64    `json:"timestamp_ns"`
+	EventType   string    `json:"event_type"`
+}
+
 // eBPF object
 type objects struct {
 	ProcessTracker *ebpf.Program `ebpf:"trace_execve"`
@@ -81,6 +93,7 @@ type objects struct {
 	NetClose       *ebpf.Program `ebpf:"trace_tcp_close"`
 	FileOpen       *ebpf.Program `ebpf:"trace_openat"`
 	FileWrite      *ebpf.Program `ebpf:"trace_write"`
+	HTTPSend       *ebpf.Program `ebpf:"trace_http_send"`
 	Events         *ebpf.Map     `ebpf:"events"`
 	TrackedPids    *ebpf.Map     `ebpf:"tracked_pids"`
 }
@@ -215,6 +228,8 @@ func (c *Collector) readEvents() {
 			jsonEvent, err = parseFileEvent(payload, "file_write")
 		case 5:  // Log write
 			jsonEvent, err = parseLogEvent(payload)
+		case 6:  // HTTP request
+			jsonEvent, err = parseHTTPEvent(payload)
 		default:
 			continue
 		}
@@ -388,10 +403,47 @@ func parseLogEvent(data []byte) (json.RawMessage, error) {
 	return json.Marshal(event)
 }
 
-// Close closes the collector
-func (c *Collector) Close() error {
-	if c.reader != nil {
-		return c.reader.Close()
+// Parse HTTP event from raw bytes
+func parseHTTPEvent(data []byte) (json.RawMessage, error) {
+	var event HTTPEvent
+
+	buf := bytes.NewReader(data)
+	if err := binary.Read(buf, binary.LittleEndian, &event.PID); err != nil {
+		return nil, err
 	}
+	if err := binary.Read(buf, binary.LittleEndian, &event.CgroupID); err != nil {
+		return nil, err
+	}
+
+	comm := make([]byte, 16)
+	if _, err := buf.Read(comm); err != nil {
+		return nil, err
+	}
+	event.Comm = cstrToString(comm)
+
+	url := make([]byte, 256)
+	if _, err := buf.Read(url); err != nil {
+		return nil, err
+	}
+	event.URL = cstrToString(url)
+
+	host := make([]byte, 128)
+	if _, err := buf.Read(host); err != nil {
+		return nil, err
+	}
+	event.Host = cstrToString(host)
+
+	if err := binary.Read(buf, binary.LittleEndian, &event.Timestamp); err != nil {
+		return nil, err
+	}
+	if err := binary.Read(buf, binary.LittleEndian, &event.Method); err != nil {
+		return nil, err
+	}
+
+	event.EventType = "http"
+
+	return json.Marshal(event)
+}
+
 	return nil
 }

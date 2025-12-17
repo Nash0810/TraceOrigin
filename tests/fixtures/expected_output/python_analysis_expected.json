@@ -1,0 +1,67 @@
+{
+  "status": "complete",
+  "timestamp": "2025-12-17T10:00:25Z",
+  "manifest": "tests/fixtures/manifests/requirements.txt",
+  "trace_log": "tests/fixtures/trace_logs/python_install_trace.json",
+  "declared_packages": 8,
+  "observed_packages": 8,
+  "verified_packages": 7,
+  "mismatches": [
+    {
+      "package": "flak",
+      "declared_version": "2.1.0",
+      "observed_version": "2.1.0",
+      "status": "typosquatting_suspected",
+      "reason": "Package name similar to 'flask', sourced from non-standard domain",
+      "source_domain": "suspicious-mirror.com",
+      "severity": "high"
+    }
+  ],
+  "packages": [
+    {
+      "name": "requests",
+      "declared_version": "2.28.1",
+      "observed_version": "2.28.1",
+      "status": "verified",
+      "source": "https://files.pythonhosted.org/packages/requests-2.28.1-py3-none-any.whl",
+      "purl": "pkg:pypi/requests@2.28.1"
+    },
+    {
+      "name": "flask",
+      "declared_version": "2.2.2",
+      "observed_version": "2.2.2",
+      "status": "verified",
+      "source": "https://files.pythonhosted.org/packages/flask-2.2.2-py3-none-any.whl",
+      "purl": "pkg:pypi/flask@2.2.2"
+    },
+    {
+      "name": "numpy",
+      "declared_version": "1.23.3",
+      "observed_version": "1.23.3",
+      "status": "verified",
+      "source": "https://files.pythonhosted.org/packages/numpy-1.23.3-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+      "purl": "pkg:pypi/numpy@1.23.3"
+    },
+    {
+      "name": "pandas",
+      "declared_version": "1.5.0",
+      "observed_version": null,
+      "status": "not_observed",
+      "reason": "Package listed in manifest but not downloaded during trace period"
+    },
+    {
+      "name": "flak",
+      "declared_version": "2.1.0",
+      "observed_version": "2.1.0",
+      "status": "verification_failed",
+      "reason": "Typosquatting suspected"
+    }
+  ],
+  "summary": {
+    "total_declared": 8,
+    "total_observed": 8,
+    "match_rate": 0.875,
+    "anomalies_detected": 1,
+    "risk_level": "medium"
+  }
+}

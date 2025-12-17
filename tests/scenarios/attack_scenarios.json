@@ -1,0 +1,250 @@
+[
+  {
+    "scenario": "version_downgrade_attack",
+    "description": "Attacker downgrades package to older vulnerable version",
+    "manifest": {
+      "name": "test-app",
+      "packages": [
+        {
+          "name": "urllib3",
+          "declared_version": "1.26.12",
+          "constraint": "=="
+        }
+      ]
+    },
+    "trace": [
+      {
+        "timestamp": "2025-12-17T14:00:01Z",
+        "event_type": "http_request",
+        "url": "https://files.pythonhosted.org/packages/urllib3-1.26.5-py2.py3-none-any.whl",
+        "method": "GET",
+        "status": 200,
+        "bytes": 156384
+      },
+      {
+        "timestamp": "2025-12-17T14:00:02Z",
+        "event_type": "file_write",
+        "path": "/usr/local/lib/python3.9/site-packages/urllib3-1.26.5.dist-info/METADATA",
+        "size": 8192
+      }
+    ],
+    "expected_result": {
+      "mismatch_detected": true,
+      "mismatch_type": "version_downgrade",
+      "declared_version": "1.26.12",
+      "observed_version": "1.26.5",
+      "severity": "critical",
+      "attack_indicator": true
+    }
+  },
+  {
+    "scenario": "typosquatting_attack",
+    "description": "Attacker installs malicious package with similar name",
+    "manifest": {
+      "packages": [
+        {
+          "name": "flask",
+          "declared_version": "2.2.2",
+          "constraint": "=="
+        }
+      ]
+    },
+    "trace": [
+      {
+        "timestamp": "2025-12-17T15:00:01Z",
+        "event_type": "http_request",
+        "url": "https://suspicious-domain.com/packages/flak-2.2.2-py3-none-any.whl",
+        "method": "GET",
+        "status": 200,
+        "bytes": 95328
+      },
+      {
+        "timestamp": "2025-12-17T15:00:02Z",
+        "event_type": "file_write",
+        "path": "/usr/local/lib/python3.9/site-packages/flak/__init__.py",
+        "size": 16384
+      }
+    ],
+    "expected_result": {
+      "mismatch_detected": true,
+      "mismatch_type": "typosquatting",
+      "declared_package": "flask",
+      "observed_package": "flak",
+      "severity": "critical",
+      "attack_indicator": true,
+      "similarity_score": 0.8
+    }
+  },
+  {
+    "scenario": "source_substitution_attack",
+    "description": "Legitimate version downloaded from malicious registry",
+    "manifest": {
+      "packages": [
+        {
+          "name": "requests",
+          "declared_version": "2.28.1",
+          "constraint": "=="
+        }
+      ]
+    },
+    "trace": [
+      {
+        "timestamp": "2025-12-17T16:00:01Z",
+        "event_type": "http_request",
+        "url": "https://attacker-registry.com/packages/requests-2.28.1-py3-none-any.whl",
+        "method": "GET",
+        "status": 200,
+        "bytes": 62819,
+        "response_hash": "sha256:malicious_hash_not_matching_official"
+      },
+      {
+        "timestamp": "2025-12-17T16:00:02Z",
+        "event_type": "file_write",
+        "path": "/usr/local/lib/python3.9/site-packages/requests/__init__.py",
+        "size": 8192,
+        "checksum": "sha256:malicious_hash_not_matching_official"
+      }
+    ],
+    "expected_result": {
+      "mismatch_detected": true,
+      "mismatch_type": "source_substitution",
+      "version_match": true,
+      "source_mismatch": true,
+      "expected_source": "files.pythonhosted.org",
+      "actual_source": "attacker-registry.com",
+      "severity": "high",
+      "attack_indicator": true
+    }
+  },
+  {
+    "scenario": "dependency_injection_attack",
+    "description": "Transitive dependency replaced with malicious version",
+    "manifest": {
+      "packages": [
+        {
+          "name": "django",
+          "declared_version": "4.1.0",
+          "constraint": "=="
+        }
+      ]
+    },
+    "trace": [
+      {
+        "timestamp": "2025-12-17T17:00:01Z",
+        "event_type": "http_request",
+        "url": "https://files.pythonhosted.org/packages/django-4.1.0-py3-none-any.whl",
+        "method": "GET",
+        "status": 200,
+        "bytes": 9841024
+      },
+      {
+        "timestamp": "2025-12-17T17:00:03Z",
+        "event_type": "http_request",
+        "url": "https://attacker-registry.com/packages/sqlparse-0.2.0-py3-none-any.whl",
+        "method": "GET",
+        "status": 200,
+        "bytes": 45632,
+        "note": "sqlparse is dependency of django, but downloaded from attacker registry"
+      },
+      {
+        "timestamp": "2025-12-17T17:00:04Z",
+        "event_type": "file_write",
+        "path": "/usr/local/lib/python3.9/site-packages/sqlparse/__init__.py",
+        "size": 12288
+      }
+    ],
+    "expected_result": {
+      "mismatch_detected": true,
+      "mismatch_type": "dependency_injection",
+      "direct_package": "django",
+      "compromised_dependency": "sqlparse",
+      "expected_source": "files.pythonhosted.org",
+      "actual_source": "attacker-registry.com",
+      "severity": "critical",
+      "attack_indicator": true,
+      "transitive": true
+    }
+  },
+  {
+    "scenario": "prerelease_substitution",
+    "description": "Stable version substituted with prerelease/RC version",
+    "manifest": {
+      "packages": [
+        {
+          "name": "numpy",
+          "declared_version": "1.23.3",
+          "constraint": "=="
+        }
+      ]
+    },
+    "trace": [
+      {
+        "timestamp": "2025-12-17T18:00:01Z",
+        "event_type": "http_request",
+        "url": "https://files.pythonhosted.org/packages/numpy-1.24.0rc1-cp310-cp310-linux_x86_64.whl",
+        "method": "GET",
+        "status": 200,
+        "bytes": 14752451
+      },
+      {
+        "timestamp": "2025-12-17T18:00:02Z",
+        "event_type": "file_write",
+        "path": "/usr/local/lib/python3.9/site-packages/numpy/__init__.py",
+        "size": 4096
+      }
+    ],
+    "expected_result": {
+      "mismatch_detected": true,
+      "mismatch_type": "prerelease_substitution",
+      "declared_version": "1.23.3",
+      "observed_version": "1.24.0rc1",
+      "declared_stability": "stable",
+      "observed_stability": "prerelease",
+      "severity": "high",
+      "attack_indicator": true
+    }
+  },
+  {
+    "scenario": "missing_package_suspicious",
+    "description": "Declared package not downloaded - may indicate substitution",
+    "manifest": {
+      "packages": [
+        {
+          "name": "cryptography",
+          "declared_version": "38.0.0",
+          "constraint": "=="
+        },
+        {
+          "name": "cffi",
+          "declared_version": "1.15.0",
+          "constraint": "=="
+        }
+      ]
+    },
+    "trace": [
+      {
+        "timestamp": "2025-12-17T19:00:01Z",
+        "event_type": "http_request",
+        "url": "https://files.pythonhosted.org/packages/cffi-1.15.0-cp310-cp310-linux_x86_64.whl",
+        "method": "GET",
+        "status": 200,
+        "bytes": 354816
+      },
+      {
+        "timestamp": "2025-12-17T19:00:02Z",
+        "event_type": "file_write",
+        "path": "/usr/local/lib/python3.9/site-packages/cffi/__init__.py",
+        "size": 2048
+      }
+    ],
+    "expected_result": {
+      "mismatch_detected": true,
+      "mismatch_type": "missing_package",
+      "declared_package": "cryptography",
+      "observed_package": null,
+      "severity": "high",
+      "attack_indicator": true,
+      "reason": "Package declared but not observed in trace - may indicate network manipulation or substitution"
+    }
+  }
+]

@@ -1,0 +1,43 @@
+[
+  {
+    "timestamp": "2025-12-17T14:00:01Z",
+    "event_type": "process_start",
+    "pid": 5678,
+    "name": "cargo",
+    "cmdline": "cargo fetch",
+    "uid": 1000
+  },
+  {
+    "timestamp": "2025-12-17T14:00:05Z",
+    "event_type": "http_request",
+    "pid": 5678,
+    "url": "https://github.com/serde-rs/serde/archive/refs/tags/v1.0.0.zip",
+    "method": "GET",
+    "status": 200,
+    "response_size": 262144
+  },
+  {
+    "timestamp": "2025-12-17T14:00:08Z",
+    "event_type": "file_write",
+    "pid": 5678,
+    "path": "/root/.cargo/registry/cache/github.com-1ecc6299db8cc6d1/serde-1.0.0.crate",
+    "size": 65536,
+    "checksum": "sha256:abc123"
+  },
+  {
+    "timestamp": "2025-12-17T14:00:10Z",
+    "event_type": "http_request",
+    "pid": 5678,
+    "url": "https://github.com/serde-rs/json/archive/refs/tags/v1.0.0.zip",
+    "method": "GET",
+    "status": 200,
+    "response_size": 131072
+  },
+  {
+    "timestamp": "2025-12-17T14:00:15Z",
+    "event_type": "process_end",
+    "pid": 5678,
+    "exit_code": 0,
+    "duration_seconds": 14
+  }
+]

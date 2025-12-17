@@ -1,0 +1,60 @@
+[
+  {
+    "timestamp": "2025-12-17T11:00:01Z",
+    "event_type": "process_start",
+    "pid": 2345,
+    "name": "npm",
+    "cmdline": "npm install",
+    "uid": 1000
+  },
+  {
+    "timestamp": "2025-12-17T11:00:05Z",
+    "event_type": "http_request",
+    "pid": 2345,
+    "url": "https://registry.npmjs.org/express/4.18.2",
+    "method": "GET",
+    "status": 200,
+    "response_size": 45312
+  },
+  {
+    "timestamp": "2025-12-17T11:00:06Z",
+    "event_type": "file_write",
+    "pid": 2345,
+    "path": "/home/user/node_modules/express/4.18.2/package.json",
+    "size": 2048,
+    "checksum": "sha256:abc123"
+  },
+  {
+    "timestamp": "2025-12-17T11:00:07Z",
+    "event_type": "http_request",
+    "pid": 2345,
+    "url": "https://registry.npmjs.org/axios/0.27.2",
+    "method": "GET",
+    "status": 200,
+    "response_size": 28194
+  },
+  {
+    "timestamp": "2025-12-17T11:00:08Z",
+    "event_type": "file_write",
+    "pid": 2345,
+    "path": "/home/user/node_modules/axios/0.27.2/package.json",
+    "size": 1856,
+    "checksum": "sha256:def456"
+  },
+  {
+    "timestamp": "2025-12-17T11:00:10Z",
+    "event_type": "http_request",
+    "pid": 2345,
+    "url": "https://registry.npmjs.org/lodash/4.17.21",
+    "method": "GET",
+    "status": 200,
+    "response_size": 156382
+  },
+  {
+    "timestamp": "2025-12-17T11:00:15Z",
+    "event_type": "process_end",
+    "pid": 2345,
+    "exit_code": 0,
+    "duration_seconds": 14
+  }
+]

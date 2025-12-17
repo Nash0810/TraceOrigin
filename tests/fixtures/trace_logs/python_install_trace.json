@@ -1,0 +1,87 @@
+[
+  {
+    "timestamp": "2025-12-17T10:00:01Z",
+    "event_type": "process_start",
+    "pid": 1234,
+    "name": "pip",
+    "cmdline": "pip install -r requirements.txt",
+    "uid": 1000
+  },
+  {
+    "timestamp": "2025-12-17T10:00:05Z",
+    "event_type": "file_write",
+    "pid": 1234,
+    "path": "/tmp/pip-cache/requests-2.28.1-py3-none-any.whl",
+    "size": 62819,
+    "checksum": "sha256:abc123"
+  },
+  {
+    "timestamp": "2025-12-17T10:00:06Z",
+    "event_type": "file_write",
+    "pid": 1234,
+    "path": "/tmp/pip-cache/flask-2.2.2-py3-none-any.whl",
+    "size": 96523,
+    "checksum": "sha256:def456"
+  },
+  {
+    "timestamp": "2025-12-17T10:00:07Z",
+    "event_type": "http_request",
+    "pid": 1234,
+    "url": "https://files.pythonhosted.org/packages/requests-2.28.1-py3-none-any.whl",
+    "method": "GET",
+    "status": 200,
+    "bytes": 62819
+  },
+  {
+    "timestamp": "2025-12-17T10:00:08Z",
+    "event_type": "http_request",
+    "pid": 1234,
+    "url": "https://files.pythonhosted.org/packages/flask-2.2.2-py3-none-any.whl",
+    "method": "GET",
+    "status": 200,
+    "bytes": 96523
+  },
+  {
+    "timestamp": "2025-12-17T10:00:10Z",
+    "event_type": "file_write",
+    "pid": 1234,
+    "path": "/tmp/pip-cache/numpy-1.23.3-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+    "size": 14752451,
+    "checksum": "sha256:ghi789"
+  },
+  {
+    "timestamp": "2025-12-17T10:00:15Z",
+    "event_type": "http_request",
+    "pid": 1234,
+    "url": "https://files.pythonhosted.org/packages/numpy-1.23.3-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+    "method": "GET",
+    "status": 200,
+    "bytes": 14752451
+  },
+  {
+    "timestamp": "2025-12-17T10:00:20Z",
+    "event_type": "file_write",
+    "pid": 1234,
+    "path": "/tmp/pip-cache/flak-2.1.0-py3-none-any.whl",
+    "size": 8192,
+    "checksum": "sha256:jkl012",
+    "suspicious_markers": ["different_publisher", "name_similarity_to_flask"]
+  },
+  {
+    "timestamp": "2025-12-17T10:00:21Z",
+    "event_type": "http_request",
+    "pid": 1234,
+    "url": "https://suspicious-mirror.com/packages/flak-2.1.0-py3-none-any.whl",
+    "method": "GET",
+    "status": 200,
+    "bytes": 8192,
+    "suspicious_markers": ["non_standard_domain"]
+  },
+  {
+    "timestamp": "2025-12-17T10:00:25Z",
+    "event_type": "process_end",
+    "pid": 1234,
+    "exit_code": 0,
+    "duration_seconds": 24
+  }
+]
