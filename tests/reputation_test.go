@@ -1,0 +1,704 @@
+package tests
+
+import (
+	"fmt"
+	"testing"
+	"time"
+
+	"github.com/Nash0810/TraceOrigin/pkg/reputation"
+)
+
+func TestReputationDatabaseCreation(t *testing.T) {
+	db := reputation.NewReputationDatabase()
+
+	if db == nil {
+		t.Error("Database creation failed")
+	}
+
+	stats := db.GetStatistics()
+	if stats["total_packages"] != 0 {
+		t.Error("New database should have no packages")
+	}
+}
+
+func TestAddPackage(t *testing.T) {
+	db := reputation.NewReputationDatabase()
+
+	pkg := &reputation.PackageReputation{
+		Name:            "test-package",
+		PackageManager:  "npm",
+		ReputationScore: 85.5,
+		TrustLevel:      reputation.TrustedLevel,
+		DownloadCount:   1000000,
+	}
+
+	err := db.AddPackage(pkg)
+	if err != nil {
+		t.Errorf("Failed to add package: %v", err)
+	}
+
+	if db.GetSize() != 1 {
+		t.Errorf("Expected 1 package, got %d", db.GetSize())
+	}
+}
+
+func TestAddPackageValidation(t *testing.T) {
+	db := reputation.NewReputationDatabase()
+
+	// Test nil package
+	err := db.AddPackage(nil)
+	if err == nil {
+		t.Error("Should reject nil package")
+	}
+
+	// Test empty name
+	pkg := &reputation.PackageReputation{PackageManager: "npm"}
+	err = db.AddPackage(pkg)
+	if err == nil {
+		t.Error("Should reject package with empty name")
+	}
+}
+
+func TestGetPackage(t *testing.T) {
+	db := reputation.NewReputationDatabase()
+
+	pkg := &reputation.PackageReputation{
+		Name:            "lodash",
+		PackageManager:  "npm",
+		ReputationScore: 90.0,
+		TrustLevel:      reputation.TrustedLevel,
+	}
+	db.AddPackage(pkg)
+
+	retrieved := db.GetPackage("lodash", "npm")
+	if retrieved == nil {
+		t.Error("Package retrieval failed")
+	}
+
+	if retrieved.ReputationScore != 90.0 {
+		t.Errorf("Expected score 90.0, got %f", retrieved.ReputationScore)
+	}
+}
+
+func TestGetPackageByNameAndVersion(t *testing.T) {
+	db := reputation.NewReputationDatabase()
+
+	pkg := &reputation.PackageReputation{
+		Name:            "express",
+		PackageManager:  "npm",
+		Version:         "4.18.0",
+		ReputationScore: 88.0,
+		TrustLevel:      reputation.TrustedLevel,
+	}
+	db.AddPackage(pkg)
+
+	retrieved := db.GetPackageByNameAndVersion("express", "npm", "4.18.0")
+	if retrieved == nil {
+		t.Error("Version-specific retrieval failed")
+	}
+
+	if retrieved.Version != "4.18.0" {
+		t.Errorf("Expected version 4.18.0, got %s", retrieved.Version)
+	}
+}
+
+func TestTrustLevelClassification(t *testing.T) {
+	db := reputation.NewReputationDatabase()
+
+	packages := []*reputation.PackageReputation{
+		{
+			Name:            "trusted-pkg",
+			PackageManager:  "npm",
+			ReputationScore: 85.0,
+			TrustLevel:      reputation.TrustedLevel,
+		},
+		{
+			Name:            "neutral-pkg",
+			PackageManager:  "npm",
+			ReputationScore: 50.0,
+			TrustLevel:      reputation.NeutralLevel,
+		},
+		{
+			Name:            "suspicious-pkg",
+			PackageManager:  "npm",
+			ReputationScore: 25.0,
+			TrustLevel:      reputation.SuspiciousLevel,
+		},
+		{
+			Name:            "malicious-pkg",
+			PackageManager:  "npm",
+			ReputationScore: 10.0,
+			TrustLevel:      reputation.MaliciousLevel,
+		},
+	}
+
+	for _, pkg := range packages {
+		db.AddPackage(pkg)
+	}
+
+	if !db.IsTrusted("trusted-pkg", "npm") {
+		t.Error("Trusted package not recognized")
+	}
+
+	if db.IsBlacklisted("trusted-pkg", "npm") {
+		t.Error("Trusted package should not be blacklisted")
+	}
+
+	if !db.IsBlacklisted("malicious-pkg", "npm") {
+		t.Error("Malicious package should be blacklisted")
+	}
+}
+
+func TestGetReputationScore(t *testing.T) {
+	db := reputation.NewReputationDatabase()
+
+	pkg := &reputation.PackageReputation{
+		Name:            "react",
+		PackageManager:  "npm",
+		ReputationScore: 92.5,
+		TrustLevel:      reputation.TrustedLevel,
+	}
+	db.AddPackage(pkg)
+
+	score, err := db.GetReputationScore("react", "npm")
+	if err != nil {
+		t.Errorf("Failed to get score: %v", err)
+	}
+
+	if score != 92.5 {
+		t.Errorf("Expected score 92.5, got %f", score)
+	}
+
+	// Non-existent package
+	_, err = db.GetReputationScore("nonexistent", "npm")
+	if err == nil {
+		t.Error("Should return error for non-existent package")
+	}
+}
+
+func TestGetTrustLevel(t *testing.T) {
+	db := reputation.NewReputationDatabase()
+
+	pkg := &reputation.PackageReputation{
+		Name:            "axios",
+		PackageManager:  "npm",
+		ReputationScore: 88.0,
+		TrustLevel:      reputation.TrustedLevel,
+	}
+	db.AddPackage(pkg)
+
+	level, err := db.GetTrustLevel("axios", "npm")
+	if err != nil {
+		t.Errorf("Failed to get trust level: %v", err)
+	}
+
+	if level != reputation.TrustedLevel {
+		t.Errorf("Expected %s, got %s", reputation.TrustedLevel, level)
+	}
+}
+
+func TestGetPackagesByManager(t *testing.T) {
+	db := reputation.NewReputationDatabase()
+
+	// Add npm packages
+	for i := 0; i < 3; i++ {
+		pkg := &reputation.PackageReputation{
+			Name:            fmt.Sprintf("npm-pkg-%d", i),
+			PackageManager:  "npm",
+			ReputationScore: 80.0 + float64(i),
+			TrustLevel:      reputation.TrustedLevel,
+		}
+		db.AddPackage(pkg)
+	}
+
+	// Add pip packages
+	for i := 0; i < 2; i++ {
+		pkg := &reputation.PackageReputation{
+			Name:            fmt.Sprintf("pip-pkg-%d", i),
+			PackageManager:  "pip",
+			ReputationScore: 75.0 + float64(i),
+			TrustLevel:      reputation.TrustedLevel,
+		}
+		db.AddPackage(pkg)
+	}
+
+	npmPackages := db.GetPackagesByManager("npm")
+	if len(npmPackages) != 3 {
+		t.Errorf("Expected 3 npm packages, got %d", len(npmPackages))
+	}
+
+	pipPackages := db.GetPackagesByManager("pip")
+	if len(pipPackages) != 2 {
+		t.Errorf("Expected 2 pip packages, got %d", len(pipPackages))
+	}
+}
+
+func TestGetTrustedPackages(t *testing.T) {
+	db := reputation.NewReputationDatabase()
+
+	// Add trusted packages
+	for i := 0; i < 3; i++ {
+		pkg := &reputation.PackageReputation{
+			Name:            fmt.Sprintf("trusted-%d", i),
+			PackageManager:  "npm",
+			ReputationScore: 85.0,
+			TrustLevel:      reputation.TrustedLevel,
+		}
+		db.AddPackage(pkg)
+	}
+
+	// Add non-trusted package
+	suspiciousPkg := &reputation.PackageReputation{
+		Name:            "suspicious-pkg",
+		PackageManager:  "npm",
+		ReputationScore: 25.0,
+		TrustLevel:      reputation.SuspiciousLevel,
+	}
+	db.AddPackage(suspiciousPkg)
+
+	trusted := db.GetTrustedPackages()
+	if len(trusted) != 3 {
+		t.Errorf("Expected 3 trusted packages, got %d", len(trusted))
+	}
+}
+
+func TestGetBlacklistedPackages(t *testing.T) {
+	db := reputation.NewReputationDatabase()
+
+	// Add blacklisted packages
+	for i := 0; i < 2; i++ {
+		pkg := &reputation.PackageReputation{
+			Name:            fmt.Sprintf("malicious-%d", i),
+			PackageManager:  "npm",
+			ReputationScore: 15.0,
+			TrustLevel:      reputation.MaliciousLevel,
+		}
+		db.AddPackage(pkg)
+	}
+
+	// Add trusted package
+	trustedPkg := &reputation.PackageReputation{
+		Name:            "trusted-pkg",
+		PackageManager:  "npm",
+		ReputationScore: 90.0,
+		TrustLevel:      reputation.TrustedLevel,
+	}
+	db.AddPackage(trustedPkg)
+
+	blacklisted := db.GetBlacklistedPackages()
+	if len(blacklisted) != 2 {
+		t.Errorf("Expected 2 blacklisted packages, got %d", len(blacklisted))
+	}
+}
+
+func TestDeletePackage(t *testing.T) {
+	db := reputation.NewReputationDatabase()
+
+	pkg := &reputation.PackageReputation{
+		Name:            "temp-pkg",
+		PackageManager:  "npm",
+		ReputationScore: 80.0,
+		TrustLevel:      reputation.TrustedLevel,
+	}
+	db.AddPackage(pkg)
+
+	if db.GetSize() != 1 {
+		t.Error("Package should be added")
+	}
+
+	err := db.DeletePackage("temp-pkg", "npm")
+	if err != nil {
+		t.Errorf("Failed to delete package: %v", err)
+	}
+
+	if db.GetSize() != 0 {
+		t.Error("Package should be deleted")
+	}
+
+	// Delete non-existent package
+	err = db.DeletePackage("nonexistent", "npm")
+	if err == nil {
+		t.Error("Should error on deleting non-existent package")
+	}
+}
+
+func TestFindPackagesByTrustLevel(t *testing.T) {
+	db := reputation.NewReputationDatabase()
+
+	trustLevels := []string{reputation.TrustedLevel, reputation.NeutralLevel, reputation.SuspiciousLevel}
+	for i, level := range trustLevels {
+		pkg := &reputation.PackageReputation{
+			Name:            fmt.Sprintf("pkg-%s-%d", level, i),
+			PackageManager:  "npm",
+			ReputationScore: 80.0 - float64(i*30),
+			TrustLevel:      level,
+		}
+		db.AddPackage(pkg)
+	}
+
+	trustedPackages := db.FindPackagesByTrustLevel(reputation.TrustedLevel)
+	if len(trustedPackages) != 1 {
+		t.Errorf("Expected 1 trusted package, got %d", len(trustedPackages))
+	}
+
+	neutralPackages := db.FindPackagesByTrustLevel(reputation.NeutralLevel)
+	if len(neutralPackages) != 1 {
+		t.Errorf("Expected 1 neutral package, got %d", len(neutralPackages))
+	}
+}
+
+func TestFindPackagesBySecurityIssues(t *testing.T) {
+	db := reputation.NewReputationDatabase()
+
+	// Add packages with different severity issues
+	severities := []string{"critical", "high", "medium", "low"}
+	for i, severity := range severities {
+		pkg := &reputation.PackageReputation{
+			Name:            fmt.Sprintf("pkg-issue-%s", severity),
+			PackageManager:  "npm",
+			ReputationScore: 60.0,
+			TrustLevel:      reputation.NeutralLevel,
+			SecurityIssues: []reputation.SecurityIssue{
+				{
+					ID:       fmt.Sprintf("CVE-2024-000%d", i),
+					Title:    fmt.Sprintf("%s severity issue", severity),
+					Severity: severity,
+				},
+			},
+		}
+		db.AddPackage(pkg)
+	}
+
+	criticalPackages := db.FindPackagesBySecurityIssues("critical")
+	if len(criticalPackages) != 1 {
+		t.Errorf("Expected 1 package with critical issue, got %d", len(criticalPackages))
+	}
+
+	highPackages := db.FindPackagesBySecurityIssues("high")
+	if len(highPackages) != 1 {
+		t.Errorf("Expected 1 package with high issue, got %d", len(highPackages))
+	}
+}
+
+func TestClearCache(t *testing.T) {
+	db := reputation.NewReputationDatabase()
+	db.SetCacheTTL(100 * time.Millisecond)
+
+	// Add packages
+	for i := 0; i < 3; i++ {
+		pkg := &reputation.PackageReputation{
+			Name:            fmt.Sprintf("cache-pkg-%d", i),
+			PackageManager:  "npm",
+			ReputationScore: 80.0,
+			TrustLevel:      reputation.TrustedLevel,
+		}
+		db.AddPackage(pkg)
+	}
+
+	// Wait for cache to expire
+	time.Sleep(150 * time.Millisecond)
+
+	expiredCount := db.ClearCache()
+	if expiredCount != 3 {
+		t.Errorf("Expected 3 expired entries, got %d", expiredCount)
+	}
+}
+
+func TestReputationGetStatistics(t *testing.T) {
+	db := reputation.NewReputationDatabase()
+
+	// Add packages with different trust levels
+	packages := []*reputation.PackageReputation{
+		{
+			Name:            "trusted-1",
+			PackageManager:  "npm",
+			ReputationScore: 85.0,
+			TrustLevel:      reputation.TrustedLevel,
+		},
+		{
+			Name:            "trusted-2",
+			PackageManager:  "npm",
+			ReputationScore: 80.0,
+			TrustLevel:      reputation.TrustedLevel,
+		},
+		{
+			Name:            "suspicious-1",
+			PackageManager:  "npm",
+			ReputationScore: 25.0,
+			TrustLevel:      reputation.SuspiciousLevel,
+		},
+	}
+
+	for _, pkg := range packages {
+		db.AddPackage(pkg)
+	}
+
+	stats := db.GetStatistics()
+	if stats["total_packages"] != 3 {
+		t.Errorf("Expected 3 packages, got %d", stats["total_packages"])
+	}
+
+	if stats["trusted_count"] != 2 {
+		t.Errorf("Expected 2 trusted, got %d", stats["trusted_count"])
+	}
+}
+
+func TestUpdateDatabase(t *testing.T) {
+	db := reputation.NewReputationDatabase()
+
+	updates := []*reputation.PackageReputation{
+		{
+			Name:            "update-pkg-1",
+			PackageManager:  "npm",
+			ReputationScore: 85.0,
+			TrustLevel:      reputation.TrustedLevel,
+		},
+		{
+			Name:            "update-pkg-2",
+			PackageManager:  "npm",
+			ReputationScore: 75.0,
+			TrustLevel:      reputation.NeutralLevel,
+		},
+	}
+
+	err := db.UpdateDatabase(updates)
+	if err != nil {
+		t.Errorf("Failed to update database: %v", err)
+	}
+
+	if db.GetSize() != 2 {
+		t.Errorf("Expected 2 packages after update, got %d", db.GetSize())
+	}
+
+	// Empty update should error
+	err = db.UpdateDatabase([]*reputation.PackageReputation{})
+	if err == nil {
+		t.Error("Empty update should error")
+	}
+}
+
+func TestFindSimilarPackages(t *testing.T) {
+	db := reputation.NewReputationDatabase()
+
+	// Add packages with similar names
+	packages := []string{"lodash", "lodash-es", "async", "asyncify"}
+	for _, name := range packages {
+		pkg := &reputation.PackageReputation{
+			Name:            name,
+			PackageManager:  "npm",
+			ReputationScore: 85.0,
+			TrustLevel:      reputation.TrustedLevel,
+		}
+		db.AddPackage(pkg)
+	}
+
+	similar := db.FindSimilarPackages("lodash", "npm")
+	if len(similar) == 0 {
+		t.Error("Should find similar packages")
+	}
+
+	for _, pkg := range similar {
+		if pkg.Name == "lodash" {
+			t.Error("Should not include the same package")
+		}
+	}
+}
+
+func TestGetAverageCommunityRating(t *testing.T) {
+	db := reputation.NewReputationDatabase()
+
+	packages := []*reputation.PackageReputation{
+		{
+			Name:               "pkg-1",
+			PackageManager:     "npm",
+			ReputationScore:    85.0,
+			TrustLevel:         reputation.TrustedLevel,
+			CommunityRating:    4.8,
+		},
+		{
+			Name:               "pkg-2",
+			PackageManager:     "npm",
+			ReputationScore:    80.0,
+			TrustLevel:         reputation.TrustedLevel,
+			CommunityRating:    4.2,
+		},
+		{
+			Name:               "pkg-3",
+			PackageManager:     "npm",
+			ReputationScore:    75.0,
+			TrustLevel:         reputation.NeutralLevel,
+			CommunityRating:    3.0,
+		},
+	}
+
+	for _, pkg := range packages {
+		db.AddPackage(pkg)
+	}
+
+	avgRating := db.GetAverageCommunityRating()
+	expectedAvg := (4.8 + 4.2 + 3.0) / 3.0
+
+	if avgRating != expectedAvg {
+		t.Errorf("Expected avg rating %.2f, got %.2f", expectedAvg, avgRating)
+	}
+}
+
+func TestGetMaintainerReputationMetrics(t *testing.T) {
+	db := reputation.NewReputationDatabase()
+
+	packages := []*reputation.PackageReputation{
+		{
+			Name:           "pkg-1",
+			PackageManager: "npm",
+			TrustLevel:     reputation.TrustedLevel,
+			MaintainerProfile: &reputation.MaintainerInfo{
+				Name:              "John Doe",
+				VerifiedPublisher: true,
+				IsOrganization:    false,
+				TrustScore:        90.0,
+			},
+		},
+		{
+			Name:           "pkg-2",
+			PackageManager: "npm",
+			TrustLevel:     reputation.TrustedLevel,
+			MaintainerProfile: &reputation.MaintainerInfo{
+				Name:              "Acme Corp",
+				VerifiedPublisher: true,
+				IsOrganization:    true,
+				TrustScore:        95.0,
+			},
+		},
+		{
+			Name:           "pkg-3",
+			PackageManager: "npm",
+			TrustLevel:     reputation.TrustedLevel,
+			MaintainerProfile: &reputation.MaintainerInfo{
+				Name:              "Jane Smith",
+				VerifiedPublisher: false,
+				IsOrganization:    false,
+				TrustScore:        70.0,
+			},
+		},
+	}
+
+	for _, pkg := range packages {
+		db.AddPackage(pkg)
+	}
+
+	metrics := db.GetMaintainerReputationMetrics()
+	if metrics["total_maintainers"] != 3 {
+		t.Errorf("Expected 3 maintainers, got %d", metrics["total_maintainers"])
+	}
+
+	if metrics["verified_publishers"] != 2 {
+		t.Errorf("Expected 2 verified publishers, got %d", metrics["verified_publishers"])
+	}
+
+	if metrics["organization_packages"] != 1 {
+		t.Errorf("Expected 1 org package, got %d", metrics["organization_packages"])
+	}
+}
+
+func TestConcurrentAccess(t *testing.T) {
+	db := reputation.NewReputationDatabase()
+
+	// Add packages concurrently
+	done := make(chan bool, 10)
+
+	for i := 0; i < 10; i++ {
+		go func(idx int) {
+			pkg := &reputation.PackageReputation{
+				Name:            fmt.Sprintf("concurrent-pkg-%d", idx),
+				PackageManager:  "npm",
+				ReputationScore: 80.0 + float64(idx),
+				TrustLevel:      reputation.TrustedLevel,
+			}
+			db.AddPackage(pkg)
+			done <- true
+		}(i)
+	}
+
+	for i := 0; i < 10; i++ {
+		<-done
+	}
+
+	if db.GetSize() != 10 {
+		t.Errorf("Expected 10 packages, got %d", db.GetSize())
+	}
+}
+
+// Benchmarks
+
+func BenchmarkAddPackage(b *testing.B) {
+	db := reputation.NewReputationDatabase()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		pkg := &reputation.PackageReputation{
+			Name:            fmt.Sprintf("bench-pkg-%d", i),
+			PackageManager:  "npm",
+			ReputationScore: 80.0,
+			TrustLevel:      reputation.TrustedLevel,
+		}
+		db.AddPackage(pkg)
+	}
+}
+
+func BenchmarkGetPackage(b *testing.B) {
+	db := reputation.NewReputationDatabase()
+
+	// Pre-populate
+	for i := 0; i < 1000; i++ {
+		pkg := &reputation.PackageReputation{
+			Name:            fmt.Sprintf("pkg-%d", i),
+			PackageManager:  "npm",
+			ReputationScore: 80.0,
+			TrustLevel:      reputation.TrustedLevel,
+		}
+		db.AddPackage(pkg)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		db.GetPackage(fmt.Sprintf("pkg-%d", i%1000), "npm")
+	}
+}
+
+func BenchmarkIsTrusted(b *testing.B) {
+	db := reputation.NewReputationDatabase()
+
+	for i := 0; i < 1000; i++ {
+		pkg := &reputation.PackageReputation{
+			Name:            fmt.Sprintf("trusted-pkg-%d", i),
+			PackageManager:  "npm",
+			ReputationScore: 85.0,
+			TrustLevel:      reputation.TrustedLevel,
+		}
+		db.AddPackage(pkg)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		db.IsTrusted(fmt.Sprintf("trusted-pkg-%d", i%1000), "npm")
+	}
+}
+
+func BenchmarkStatistics(b *testing.B) {
+	db := reputation.NewReputationDatabase()
+
+	for i := 0; i < 500; i++ {
+		pkg := &reputation.PackageReputation{
+			Name:            fmt.Sprintf("pkg-%d", i),
+			PackageManager:  "npm",
+			ReputationScore: 80.0,
+			TrustLevel:      reputation.TrustedLevel,
+		}
+		db.AddPackage(pkg)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		db.GetStatistics()
+	}
+}

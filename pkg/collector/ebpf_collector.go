@@ -1,4 +1,4 @@
-package main
+package collector
 
 import (
 	"bytes"
@@ -14,17 +14,17 @@ import (
 	"github.com/cilium/ebpf/ringbuf"
 )
 
-// EventType represents the type of event from eBPF
-type EventType uint32
+// KernelEventType represents the type of event from eBPF kernel
+type KernelEventType uint32
 
 const (
-	EventTypeExec    EventType = 0
-	EventTypeNetStart EventType = 1
-	EventTypeNetEnd   EventType = 2
-	EventTypeFileOpen EventType = 3
-	EventTypeFileWrite EventType = 4
-	EventTypeLogWrite EventType = 5
-	EventTypeHTTP     EventType = 6
+	KernelEventTypeExec    KernelEventType = 0
+	KernelEventTypeNetStart KernelEventType = 1
+	KernelEventTypeNetEnd   KernelEventType = 2
+	KernelEventTypeFileOpen KernelEventType = 3
+	KernelEventTypeFileWrite KernelEventType = 4
+	KernelEventTypeLogWrite KernelEventType = 5
+	KernelEventTypeHTTP     KernelEventType = 6
 )
 
 // ExecEvent - Process execution event
@@ -176,7 +176,7 @@ func (c *Collector) Start(outputFile string) {
 		outFile = os.Stdout
 	}
 
-	fmt.Fprintf(outFile, "[*] Supply Tracer v%s - Monitoring package manager activity\n", Version)
+	fmt.Fprintf(outFile, "[*] Supply Tracer - Monitoring package manager activity\n")
 	fmt.Fprintf(outFile, "[*] Press Ctrl+C to stop\n\n")
 
 	eventCount := 0
@@ -213,29 +213,29 @@ func (c *Collector) readEvents() {
 		payload := record.RawSample[1:]
 
 		var jsonEvent json.RawMessage
-		var err error
+		var parseErr error
 
 		switch eventType {
 		case 0:  // Exec event
-			jsonEvent, err = parseExecEvent(payload)
+			jsonEvent, parseErr = parseExecEvent(payload)
 		case 1:  // Net connect
-			jsonEvent, err = parseNetEvent(payload, "tcp_connect")
+			jsonEvent, parseErr = parseNetEvent(payload, "tcp_connect")
 		case 2:  // Net close
-			jsonEvent, err = parseNetEvent(payload, "tcp_close")
+			jsonEvent, parseErr = parseNetEvent(payload, "tcp_close")
 		case 3:  // File open
-			jsonEvent, err = parseFileEvent(payload, "file_open")
+			jsonEvent, parseErr = parseFileEvent(payload, "file_open")
 		case 4:  // File write
-			jsonEvent, err = parseFileEvent(payload, "file_write")
+			jsonEvent, parseErr = parseFileEvent(payload, "file_write")
 		case 5:  // Log write
-			jsonEvent, err = parseLogEvent(payload)
+			jsonEvent, parseErr = parseLogEvent(payload)
 		case 6:  // HTTP request
-			jsonEvent, err = parseHTTPEvent(payload)
+			jsonEvent, parseErr = parseHTTPEvent(payload)
 		default:
 			continue
 		}
 
-		if err != nil {
-			log.Printf("error parsing event: %v", err)
+		if parseErr != nil {
+			log.Printf("error parsing event: %v", parseErr)
 			continue
 		}
 
@@ -443,7 +443,4 @@ func parseHTTPEvent(data []byte) (json.RawMessage, error) {
 	event.EventType = "http"
 
 	return json.Marshal(event)
-}
-
-	return nil
 }

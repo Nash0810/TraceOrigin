@@ -40,3 +40,4 @@ plan.txt
 *.md
 !README.md
 !ARCHITECTURE.md
+test_output.txt
