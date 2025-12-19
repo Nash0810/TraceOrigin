@@ -1,0 +1,412 @@
+# GitLab CI Configuration for Supply Chain Security Scanning
+# Place this file as .gitlab-ci.yml in your repository root
+
+stages:
+  - prepare
+  - install
+  - trace
+  - analyze
+  - report
+  - notify
+
+variables:
+  TRACER_VERSION: "latest"
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  NPM_CACHE_DIR: "$CI_PROJECT_DIR/.cache/npm"
+
+# Cache configuration
+cache:
+  paths:
+    - .cache/pip
+    - .cache/npm
+    - node_modules/
+
+# Define Docker image
+image: ubuntu:22.04
+
+before_script:
+  - apt-get update -qq
+  - apt-get install -y -qq curl git
+
+# ============================================================================
+# PREPARE STAGE
+# ============================================================================
+
+install_tracer:
+  stage: prepare
+  script:
+    - curl -sSL https://raw.githubusercontent.com/Nash0810/TraceOrigin/main/scripts/install.sh | bash
+    - tracer --version
+  artifacts:
+    reports:
+      dotenv: build.env
+  cache: {}
+
+# ============================================================================
+# INSTALL STAGE
+# ============================================================================
+
+install_dependencies:
+  stage: install
+  image: python:3.11
+  script:
+    - |
+      if [ -f requirements.txt ]; then
+        echo "Installing Python dependencies..."
+        pip install --no-cache-dir -r requirements.txt 2>&1 | tee pip-install.log
+      fi
+  artifacts:
+    paths:
+      - pip-install.log
+    expire_in: 1 week
+  allow_failure: true
+  only:
+    - branches
+    - merge_requests
+
+install_npm_dependencies:
+  stage: install
+  image: node:18
+  script:
+    - |
+      if [ -f package.json ]; then
+        echo "Installing Node.js dependencies..."
+        npm ci --verbose 2>&1 | tee npm-install.log
+      fi
+  artifacts:
+    paths:
+      - npm-install.log
+    expire_in: 1 week
+  allow_failure: true
+  only:
+    - branches
+    - merge_requests
+
+# ============================================================================
+# TRACE STAGE
+# ============================================================================
+
+trace_python:
+  stage: trace
+  image: python:3.11
+  dependencies:
+    - install_tracer
+    - install_dependencies
+  script:
+    - apt-get install -y -qq curl git
+    - curl -sSL https://raw.githubusercontent.com/Nash0810/TraceOrigin/main/scripts/install.sh | bash
+    - |
+      if [ -f requirements.txt ]; then
+        echo "[*] Tracing Python environment..."
+        tracer trace \
+          --output=trace-python.json \
+          --format=json
+      fi
+  artifacts:
+    paths:
+      - trace-python.json
+    expire_in: 7 days
+  allow_failure: true
+  only:
+    - branches
+    - merge_requests
+
+trace_nodejs:
+  stage: trace
+  image: node:18
+  dependencies:
+    - install_tracer
+    - install_npm_dependencies
+  script:
+    - apt-get install -y -qq curl git
+    - curl -sSL https://raw.githubusercontent.com/Nash0810/TraceOrigin/main/scripts/install.sh | bash
+    - |
+      if [ -f package.json ]; then
+        echo "[*] Tracing Node.js environment..."
+        tracer trace \
+          --output=trace-nodejs.json \
+          --format=json
+      fi
+  artifacts:
+    paths:
+      - trace-nodejs.json
+    expire_in: 7 days
+  allow_failure: true
+  only:
+    - branches
+    - merge_requests
+
+# ============================================================================
+# ANALYZE STAGE
+# ============================================================================
+
+analyze_python:
+  stage: analyze
+  image: python:3.11
+  dependencies:
+    - install_tracer
+    - trace_python
+  script:
+    - apt-get install -y -qq curl git
+    - curl -sSL https://raw.githubusercontent.com/Nash0810/TraceOrigin/main/scripts/install.sh | bash
+    - |
+      if [ -f requirements.txt ] && [ -f trace-python.json ]; then
+        echo "[*] Analyzing Python manifest..."
+        tracer analyze requirements.txt trace-python.json \
+          --detect-typosquatting \
+          --check-domains \
+          2>&1 | tee analyze-python.log
+      fi
+  artifacts:
+    paths:
+      - analyze-python.log
+    reports:
+      dotenv: analyze.env
+    expire_in: 7 days
+  allow_failure: true
+  only:
+    - branches
+    - merge_requests
+
+analyze_nodejs:
+  stage: analyze
+  image: node:18
+  dependencies:
+    - install_tracer
+    - trace_nodejs
+  script:
+    - apt-get install -y -qq curl git
+    - curl -sSL https://raw.githubusercontent.com/Nash0810/TraceOrigin/main/scripts/install.sh | bash
+    - |
+      if [ -f package.json ] && [ -f trace-nodejs.json ]; then
+        echo "[*] Analyzing Node.js manifest..."
+        tracer analyze package.json trace-nodejs.json \
+          --detect-typosquatting \
+          --check-domains \
+          2>&1 | tee analyze-nodejs.log
+      fi
+  artifacts:
+    paths:
+      - analyze-nodejs.log
+    reports:
+      dotenv: analyze.env
+    expire_in: 7 days
+  allow_failure: true
+  only:
+    - branches
+    - merge_requests
+
+# ============================================================================
+# REPORT STAGE
+# ============================================================================
+
+generate_sbom_python:
+  stage: report
+  image: python:3.11
+  dependencies:
+    - install_tracer
+    - trace_python
+  script:
+    - apt-get install -y -qq curl git
+    - curl -sSL https://raw.githubusercontent.com/Nash0810/TraceOrigin/main/scripts/install.sh | bash
+    - |
+      if [ -f trace-python.json ] && [ -f requirements.txt ]; then
+        echo "[*] Generating Python SBOM..."
+        tracer sbom trace-python.json requirements.txt \
+          --format=cyclonedx \
+          --output=sbom-python.json
+        
+        # Also generate SPDX
+        tracer sbom trace-python.json requirements.txt \
+          --format=spdx \
+          --output=sbom-python.spdx
+      fi
+  artifacts:
+    paths:
+      - sbom-python.json
+      - sbom-python.spdx
+    expire_in: 30 days
+  allow_failure: true
+  only:
+    - branches
+    - merge_requests
+
+generate_sbom_nodejs:
+  stage: report
+  image: node:18
+  dependencies:
+    - install_tracer
+    - trace_nodejs
+  script:
+    - apt-get install -y -qq curl git
+    - curl -sSL https://raw.githubusercontent.com/Nash0810/TraceOrigin/main/scripts/install.sh | bash
+    - |
+      if [ -f trace-nodejs.json ] && [ -f package.json ]; then
+        echo "[*] Generating Node.js SBOM..."
+        tracer sbom trace-nodejs.json package.json \
+          --format=cyclonedx \
+          --output=sbom-nodejs.json
+        
+        # Also generate SPDX
+        tracer sbom trace-nodejs.json package.json \
+          --format=spdx \
+          --output=sbom-nodejs.spdx
+      fi
+  artifacts:
+    paths:
+      - sbom-nodejs.json
+      - sbom-nodejs.spdx
+    expire_in: 30 days
+  allow_failure: true
+  only:
+    - branches
+    - merge_requests
+
+generate_report:
+  stage: report
+  dependencies:
+    - install_tracer
+    - analyze_python
+    - analyze_nodejs
+  script:
+    - apt-get install -y -qq curl git
+    - curl -sSL https://raw.githubusercontent.com/Nash0810/TraceOrigin/main/scripts/install.sh | bash
+    - |
+      echo "[*] Generating security report..."
+
+      # Determine trace file
+      TRACE_FILE=""
+      [ -f trace-python.json ] && TRACE_FILE="trace-python.json"
+      [ -f trace-nodejs.json ] && TRACE_FILE="trace-nodejs.json"
+
+      if [ -n "$TRACE_FILE" ]; then
+        # JSON report
+        tracer report \
+          --format=json \
+          --include-sbom \
+          --output=security-report.json
+        
+        # HTML report for easy viewing
+        tracer report \
+          --format=html \
+          --include-sbom \
+          --output=security-report.html
+      fi
+  artifacts:
+    paths:
+      - security-report.json
+      - security-report.html
+    expire_in: 90 days
+  allow_failure: true
+  only:
+    - branches
+    - merge_requests
+
+validate_sbom:
+  stage: report
+  dependencies:
+    - install_tracer
+    - generate_sbom_python
+    - generate_sbom_nodejs
+  script:
+    - apt-get install -y -qq curl git
+    - curl -sSL https://raw.githubusercontent.com/Nash0810/TraceOrigin/main/scripts/install.sh | bash
+    - |
+      for sbom in sbom-*.json; do
+        if [ -f "$sbom" ]; then
+          echo "[*] Validating $sbom..."
+          tracer validate "$sbom" \
+            --db=osv \
+            --output="${sbom%.json}-validation.json" || true
+        fi
+      done
+  artifacts:
+    paths:
+      - "*-validation.json"
+    expire_in: 30 days
+  allow_failure: true
+  only:
+    - branches
+    - merge_requests
+
+# ============================================================================
+# NOTIFY STAGE
+# ============================================================================
+
+slack_notification:
+  stage: notify
+  image: curlimages/curl:latest
+  script:
+    - |
+      STATUS=$(if [ "$CI_JOB_STATUS" == "success" ]; then echo "✅ Success"; else echo "❌ Failed"; fi)
+
+      curl -X POST "$SLACK_WEBHOOK_URL" \
+        -H 'Content-type: application/json' \
+        -d '{
+          "text": "Supply Chain Security Scan: '${STATUS}'",
+          "blocks": [
+            {
+              "type": "section",
+              "text": {
+                "type": "mrkdwn",
+                "text": "*Supply Chain Security Scan* - '${STATUS}'\n*Project*: '${CI_PROJECT_NAME}'\n*Branch*: '${CI_COMMIT_REF_NAME}'\n*Commit*: '${CI_COMMIT_SHORT_SHA}'"
+              }
+            },
+            {
+              "type": "actions",
+              "elements": [
+                {
+                  "type": "button",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "View Pipeline"
+                  },
+                  "url": "'${CI_PIPELINE_URL}'"
+                }
+              ]
+            }
+          ]
+        }'
+  only:
+    variables:
+      - $SLACK_WEBHOOK_URL
+  allow_failure: true
+  when: always
+
+# ============================================================================
+# MERGE REQUEST SPECIFIC
+# ============================================================================
+
+approve_merge_request:
+  stage: notify
+  script:
+    - |
+      if [ "$CI_MERGE_REQUEST_APPROVED" == "true" ]; then
+        echo "✅ Merge request approved after security scan"
+      else
+        echo "⚠️ Merge request requires approval"
+      fi
+  only:
+    - merge_requests
+  when: on_success
+
+# ============================================================================
+# PAGES (Optional: Deploy report to GitLab Pages)
+# ============================================================================
+
+pages:
+  stage: report
+  dependencies:
+    - generate_report
+  script:
+    - mkdir -p public
+    - cp security-report.html public/index.html
+    - cp security-report.json public/report.json
+  artifacts:
+    paths:
+      - public
+    expire_in: 90 days
+  only:
+    - main
+  when: on_success
+  allow_failure: true

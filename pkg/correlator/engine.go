@@ -4,6 +4,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/Nash0810/TraceOrigin/pkg/container"
 )
 
 // DependencyChain represents a complete dependency download chain
@@ -28,6 +30,7 @@ type ProcessContext struct {
 	StartTime      time.Time
 	PackageManager string
 	CgroupID       uint64
+	ContainerID    string // Resolved container ID/name
 }
 
 // NetworkEvent represents a network connection
@@ -80,6 +83,9 @@ type CorrelationEngine struct {
 	// Per-PID log line buffers for reassembly
 	logBuffers map[uint32]string
 
+	// Container resolver for translating cgroup IDs to container names
+	containerResolver *container.ContainerResolver
+
 	// Regex patterns for package extraction
 	pythonRegex map[string]*regexp.Regexp
 	npmRegex    map[string]*regexp.Regexp
@@ -89,16 +95,17 @@ type CorrelationEngine struct {
 // NewCorrelationEngine creates a new correlation engine
 func NewCorrelationEngine() *CorrelationEngine {
 	engine := &CorrelationEngine{
-		processMap:       make(map[uint32]*ProcessContext),
-		networkEvents:    make(map[uint32][]*NetworkEvent),
-		fileEvents:       make(map[uint32][]*FileEvent),
-		logEvents:        make(map[uint32][]*LogEvent),
-		httpEvents:       make(map[uint32][]*HTTPEvent),
-		dependencyChains: []DependencyChain{},
-		logBuffers:       make(map[uint32]string),
-		pythonRegex:      make(map[string]*regexp.Regexp),
-		npmRegex:         make(map[string]*regexp.Regexp),
-		aptRegex:         make(map[string]*regexp.Regexp),
+		processMap:        make(map[uint32]*ProcessContext),
+		networkEvents:     make(map[uint32][]*NetworkEvent),
+		fileEvents:        make(map[uint32][]*FileEvent),
+		logEvents:         make(map[uint32][]*LogEvent),
+		httpEvents:        make(map[uint32][]*HTTPEvent),
+		dependencyChains:  []DependencyChain{},
+		logBuffers:        make(map[uint32]string),
+		containerResolver: container.NewContainerResolver(),
+		pythonRegex:       make(map[string]*regexp.Regexp),
+		npmRegex:          make(map[string]*regexp.Regexp),
+		aptRegex:          make(map[string]*regexp.Regexp),
 	}
 
 	// Compile regex patterns for log parsing
@@ -131,13 +138,17 @@ func NewCorrelationEngine() *CorrelationEngine {
 
 // AddProcessEvent records process execution
 func (e *CorrelationEngine) AddProcessEvent(pid, ppid uint32, cgroup uint64, comm, argv string) {
-	e.processMap[pid] = &ProcessContext{
+	ctx := &ProcessContext{
 		PID:            pid,
 		Comm:           comm,
 		StartTime:      time.Now(),
 		PackageManager: comm,
 		CgroupID:       cgroup,
 	}
+	// Resolve container ID from cgroup ID
+	ctx.ContainerID = e.containerResolver.ResolveCgroupID(cgroup)
+
+	e.processMap[pid] = ctx
 }
 
 // AddNetworkEvent records network connection
@@ -270,19 +281,22 @@ func (e *CorrelationEngine) parsePythonLog(line string, ctx *ProcessContext, tim
 	// Try to match download pattern
 	matches := e.pythonRegex["download"].FindStringSubmatch(line)
 	if len(matches) >= 3 {
-		return &DependencyChain{
+		chain := &DependencyChain{
 			PackageName:    matches[1],
 			ActualVersion:  matches[2],
 			PackageManager: "pip",
 			DownloadTime:   time.Unix(0, int64(timestamp)),
 			LogEntry:       line,
 		}
+		// Link with network connection using time window lookup
+		chain.DownloadIP = e.findMatchingConnection(ctx.PID, timestamp)
+		return chain
 	}
 
 	// Try install pattern
 	matches = e.pythonRegex["install"].FindStringSubmatch(line)
 	if len(matches) >= 3 {
-		return &DependencyChain{
+		chain := &DependencyChain{
 			PackageName:    matches[1],
 			ActualVersion:  matches[2],
 			PackageManager: "pip",
@@ -290,6 +304,9 @@ func (e *CorrelationEngine) parsePythonLog(line string, ctx *ProcessContext, tim
 			LogEntry:       line,
 			Verified:       true,
 		}
+		// Link with network connection using time window lookup
+		chain.DownloadIP = e.findMatchingConnection(ctx.PID, timestamp)
+		return chain
 	}
 
 	return nil
@@ -299,13 +316,16 @@ func (e *CorrelationEngine) parsePythonLog(line string, ctx *ProcessContext, tim
 func (e *CorrelationEngine) parseNpmLog(line string, ctx *ProcessContext, timestamp uint64) *DependencyChain {
 	matches := e.npmRegex["package"].FindStringSubmatch(line)
 	if len(matches) >= 3 {
-		return &DependencyChain{
+		chain := &DependencyChain{
 			PackageName:    matches[1],
 			ActualVersion:  matches[2],
 			PackageManager: "npm",
 			DownloadTime:   time.Unix(0, int64(timestamp)),
 			LogEntry:       line,
 		}
+		// Link with network connection using time window lookup
+		chain.DownloadIP = e.findMatchingConnection(ctx.PID, timestamp)
+		return chain
 	}
 
 	return nil
@@ -316,7 +336,7 @@ func (e *CorrelationEngine) parseAptLog(line string, ctx *ProcessContext, timest
 	// Try setup pattern
 	matches := e.aptRegex["setup"].FindStringSubmatch(line)
 	if len(matches) >= 3 {
-		return &DependencyChain{
+		chain := &DependencyChain{
 			PackageName:    matches[1],
 			ActualVersion:  matches[2],
 			PackageManager: "apt",
@@ -324,21 +344,61 @@ func (e *CorrelationEngine) parseAptLog(line string, ctx *ProcessContext, timest
 			LogEntry:       line,
 			Verified:       true,
 		}
+		// Link with network connection using time window lookup
+		chain.DownloadIP = e.findMatchingConnection(ctx.PID, timestamp)
+		return chain
 	}
 
 	// Try unpack pattern
 	matches = e.aptRegex["unpack"].FindStringSubmatch(line)
 	if len(matches) >= 3 {
-		return &DependencyChain{
+		chain := &DependencyChain{
 			PackageName:    matches[1],
 			ActualVersion:  matches[2],
 			PackageManager: "apt",
 			DownloadTime:   time.Unix(0, int64(timestamp)),
 			LogEntry:       line,
 		}
+		// Link with network connection using time window lookup
+		chain.DownloadIP = e.findMatchingConnection(ctx.PID, timestamp)
+		return chain
 	}
 
 	return nil
+}
+
+// findMatchingConnection looks up a network connection that was active at a given timestamp
+// Uses a 5-second time window to match log events with network connections
+func (e *CorrelationEngine) findMatchingConnection(pid uint32, logTime uint64) string {
+	events := e.networkEvents[pid]
+	if len(events) == 0 {
+		return ""
+	}
+
+	// Time window: 5 seconds in nanoseconds
+	const timeWindowNano = 5_000_000_000
+
+	// Iterate backwards through network events (most recent first)
+	for i := len(events) - 1; i >= 0; i-- {
+		conn := events[i]
+
+		// Check if log timestamp falls within 5 seconds after connection start
+		// This heuristic captures typical scenario where download happens shortly after connect
+		if logTime >= conn.Timestamp && logTime <= (conn.Timestamp+timeWindowNano) {
+			// Prefer active (non-closed) connections
+			if conn.IsStart {
+				return conn.DstAddr
+			}
+		}
+
+		// Also check if connection is still potentially active (started before log)
+		// Useful for longer downloads where close event hasn't arrived yet
+		if conn.IsStart && logTime >= conn.Timestamp {
+			return conn.DstAddr
+		}
+	}
+
+	return ""
 }
 
 // GetDependencyChains returns all detected dependency chains

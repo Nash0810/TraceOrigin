@@ -1,0 +1,42 @@
+# Test Dockerfile for Python application with Supply Tracer
+# This is a test/validation Dockerfile to verify supply chain scanning in containers
+
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install Supply Tracer from release
+RUN apt-get update && apt-get install -y \
+    curl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl -sSL https://raw.githubusercontent.com/Nash0810/TraceOrigin/main/scripts/install.sh | bash
+
+# Copy application requirements
+COPY requirements.txt .
+
+# Create traced installation log
+RUN tracer trace --output /app/trace.json --format json || true
+
+# Install Python dependencies (this will be traced)
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY . .
+
+# Generate SBOM from installation trace
+RUN tracer sbom /app/trace.json requirements.txt \
+    --format=cyclonedx \
+    --output=/app/sbom.json || true
+
+# Analyze for vulnerabilities
+RUN tracer validate /app/sbom.json --db=osv --output=/app/validation.json || true
+
+# Labels for testing
+LABEL test="true"
+LABEL tracer.scanned="true"
+LABEL tracer.sbom="/app/sbom.json"
+
+# Default command
+CMD ["python", "app.py"]

@@ -1,0 +1,277 @@
+name: Supply Chain Security Scan
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - "**.py"
+      - "**.js"
+      - "**.go"
+      - "**/requirements.txt"
+      - "**/package.json"
+      - "**/go.mod"
+      - "**/Gemfile"
+      - "**/Cargo.toml"
+  pull_request:
+    branches: [main]
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: write
+  checks: write
+
+jobs:
+  supply-chain-scan:
+    name: Supply Chain Security Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.8", "3.9", "3.10", "3.11"]
+        node-version: ["16", "18", "20"]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Supply Tracer
+        run: |
+          curl -sSL https://raw.githubusercontent.com/Nash0810/TraceOrigin/main/scripts/install.sh | bash
+          tracer --version
+
+      - name: Set up Python
+        if: hashFiles('**/requirements.txt') != ''
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Set up Node.js
+        if: hashFiles('**/package.json') != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: "npm"
+
+      - name: Install dependencies (Python)
+        if: hashFiles('**/requirements.txt') != ''
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt 2>&1 | tee /tmp/pip.log
+
+      - name: Install dependencies (Node.js)
+        if: hashFiles('**/package.json') != ''
+        run: npm ci --verbose 2>&1 | tee /tmp/npm.log
+
+      - name: Trace package installations
+        id: trace
+        run: |
+          tracer trace \
+            --output=/tmp/trace.json \
+            --format=json
+          echo "trace_file=/tmp/trace.json" >> $GITHUB_OUTPUT
+
+      - name: Detect supply chain anomalies
+        id: detect
+        continue-on-error: true
+        run: |
+          set -o pipefail
+
+          if [ -f requirements.txt ]; then
+            echo "🔍 Analyzing Python packages..."
+            tracer analyze requirements.txt /tmp/trace.json \
+              --detect-typosquatting \
+              --check-domains \
+              --strict 2>&1 | tee /tmp/analyze.log
+          fi
+
+          if [ -f package.json ]; then
+            echo "🔍 Analyzing Node packages..."
+            tracer analyze package.json /tmp/trace.json \
+              --detect-typosquatting \
+              --check-domains \
+              --strict 2>&1 | tee -a /tmp/analyze.log
+          fi
+
+      - name: Generate SBOM (CycloneDX)
+        if: always()
+        id: sbom
+        run: |
+          tracer sbom /tmp/trace.json requirements.txt \
+            --format=cyclonedx \
+            --output=/tmp/sbom.json
+          echo "sbom_file=/tmp/sbom.json" >> $GITHUB_OUTPUT
+
+          # Also generate SPDX format
+          tracer sbom /tmp/trace.json requirements.txt \
+            --format=spdx \
+            --output=/tmp/sbom.spdx
+
+      - name: Validate SBOM against vulnerabilities
+        if: always()
+        continue-on-error: true
+        run: |
+          tracer validate /tmp/sbom.json \
+            --db=osv \
+            --output=/tmp/validation.json
+
+      - name: Generate security report
+        if: always()
+        run: |
+          tracer report \
+            --format=json \
+            --include-sbom \
+            --output=/tmp/security-report.json
+
+          # Also generate HTML report for artifact
+          tracer report \
+            --format=html \
+            --include-sbom \
+            --output=/tmp/security-report.html
+
+      - name: Upload SBOM to GitHub
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: sbom-${{ matrix.python-version }}-${{ matrix.node-version }}
+          path: |
+            /tmp/sbom.json
+            /tmp/sbom.spdx
+            /tmp/security-report.json
+            /tmp/security-report.html
+          retention-days: 30
+
+      - name: Comment PR with results
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            let analysisResult = '✅ No issues detected';
+            if (fs.existsSync('/tmp/analyze.log')) {
+              const content = fs.readFileSync('/tmp/analyze.log', 'utf8');
+              if (content.includes('MISMATCH') || content.includes('CRITICAL')) {
+                analysisResult = '⚠️ Security issues detected - review report';
+              }
+            }
+
+            const sbomInfo = fs.existsSync('/tmp/sbom.json') ? 
+              '✓ SBOM generated' : '✗ SBOM generation failed';
+
+            const comment = `## 🔐 Supply Chain Security Scan
+
+            **Python**: ${{ matrix.python-version }}
+            **Node.js**: ${{ matrix.node-version }}
+
+            ### Results
+            - **Analysis**: ${analysisResult}
+            - **SBOM**: ${sbomInfo}
+            - **Trace**: ✓ Completed
+
+            📊 Artifacts available for download
+            `;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+
+      - name: Publish results to GitHub Security tab
+        if: always()
+        uses: advanced-security/publish-security-events@main
+        with:
+          format: sarif
+          files: /tmp/security-report.json
+        continue-on-error: true
+
+      - name: Slack notification on failure
+        if: failure()
+        uses: slackapi/slack-github-action@v1.24.0
+        with:
+          payload: |
+            {
+              "text": "Supply Chain Security Scan Failed",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "🚨 *Supply Chain Security Scan Failed*\n*Repository*: ${{ github.repository }}\n*Branch*: ${{ github.ref }}\n*Author*: ${{ github.actor }}"
+                  }
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "text": "View Logs"
+                      },
+                      "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                    }
+                  ]
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+
+      - name: Fail job if critical issues found
+        if: steps.detect.outcome == 'failure'
+        run: |
+          echo "Critical supply chain security issues detected!"
+          exit 1
+
+  # Separate job for container scanning
+  container-scan:
+    name: Container Supply Chain Scan
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build container image
+        run: docker build -t traceorigin:${{ github.sha }} .
+
+      - name: Install Supply Tracer
+        run: |
+          curl -sSL https://raw.githubusercontent.com/Nash0810/TraceOrigin/main/scripts/install.sh | bash
+
+      - name: Trace container dependencies
+        run: |
+          # Start container and trace
+          docker run -d --name tracer-scan traceorigin:${{ github.sha }} sleep 3600
+
+          # Run supply tracer inside container
+          docker exec tracer-scan tracer trace --output=/tmp/container.json
+
+          # Copy results
+          docker cp tracer-scan:/tmp/container.json /tmp/
+          docker stop tracer-scan
+
+      - name: Generate container SBOM
+        run: |
+          tracer sbom /tmp/container.json requirements.txt \
+            --format=cyclonedx \
+            --output=/tmp/container-sbom.json
+
+      - name: Upload container artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: container-sbom
+          path: /tmp/container-sbom.json
+          retention-days: 30

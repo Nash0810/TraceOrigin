@@ -1,43 +1,318 @@
-# Binaries
+# ============================================================================
+# BINARIES & EXECUTABLES
+# ============================================================================
+
+# Build output directories
 bin/
 dist/
+build/
+releases/
+
+# Compiled object files
 *.o
 *.a
+*.so
+*.dylib
 
-# IDE
+# Executable files
+*.exe
+*.exe~
+*.dll
+*.so.*
+
+# Go compiled binaries
+tracer
+tracer.exe
+supply-tracer
+supply-tracer.exe
+
+# ============================================================================
+# IDE & EDITOR FILES
+# ============================================================================
+
+# VS Code
 .vscode/
+*.code-workspace
+.vscode/launch.json
+.vscode/settings.json
+.vscode/extensions.json
+
+# JetBrains IDEs
 .idea/
+*.iml
+*.iws
+*.ipr
+.gradle/
+
+# Vim
 *.swp
 *.swo
 *~
+.vim/
+.swapfiles/
 
-# OS
+# Emacs
+*~
+\#*\#
+.\#*
+
+# Sublime Text
+*.sublime-workspace
+*.sublime-project
+
+# VS
+.vs/
+*.sln.user
+
+# ============================================================================
+# OPERATING SYSTEM FILES
+# ============================================================================
+
+# macOS
 .DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Windows
 Thumbs.db
+thumbs.db
+Desktop.ini
+ehthumbs.db
 
-# Build artifacts
-*.so
-*.dylib
-*.exe
+# Linux
+.directory
+.nope
 
-# Go
+# ============================================================================
+# GO DEVELOPMENT
+# ============================================================================
+
+# Dependency management
 go.sum
+go.work.sum
 vendor/
+mod/
 
-# Logs
-*.log
+# Go test cache
+.gotest-cache/
 
-# eBPF
+# Go build cache
+.gocache/
+
+# Local development builds
+bin/
+dist/
+
+# Test coverage files
+*.out
+coverage/
+*.coverprofile
+
+# ============================================================================
+# eBPF DEVELOPMENT
+# ============================================================================
+
+# Generated vmlinux headers (can be regenerated)
 vmlinux.h
+
+# Compiled eBPF objects
 *.bpf.o
+*.o
 
-# Backup
-plan.txt.bak
-*.backup
+# LLVM/Clang intermediate files
+*.ll
+*.bc
 
+# eBPF debug files
+*.debug
+*.dwarf
 
-plan.txt
-*.md
-!README.md
-!ARCHITECTURE.md
+# ============================================================================
+# TESTING & BUILD ARTIFACTS
+# ============================================================================
+
+# Test output files
 test_output.txt
+*.test
+test.out
+test_*.json
+test_*.log
+full_test.log
+
+# Trace files from testing
+trace*.json
+trace*.log
+testdata/traces/
+
+# eBPF test artifacts
+test_ebpf_*.o
+perf_*.log
+
+# WHITELISTED - Test files for E2E and performance testing
+!tests/e2e/
+!tests/performance/
+!tests/e2e/e2e_test.go
+!tests/performance/performance_test.go
+
+# ============================================================================
+# DOCKER & CONTAINERIZATION
+# ============================================================================
+
+# Docker build cache
+.docker-build-cache/
+
+# Docker volumes (if any)
+docker-volumes/
+
+# Kubernetes files (if any)
+k8s/
+
+# WHITELISTED - Docker files for production/testing
+!Dockerfile
+!docker-compose.yml
+!tests/dockerfiles/
+!tests/dockerfiles/*.md
+
+# ============================================================================
+# DOCUMENTATION & REPORTS
+# ============================================================================
+
+# Temporary documentation
+*.tmp.md
+*.draft.md
+
+# Build reports
+build-report.txt
+build-report.html
+build-report.json
+
+# Test reports
+test-report.html
+test-report.json
+test-report.xml
+junit-report.xml
+coverage-report.html
+
+# Performance profiling
+*.pprof
+*.prof
+cpu.prof
+mem.prof
+trace.prof
+
+# ============================================================================
+# BACKUP & TEMPORARY FILES
+# ============================================================================
+
+# Backup files
+*.bak
+*.backup
+*.back
+*.orig
+*.tmp
+*.temp
+*~
+
+# Temporary directories
+.tmp/
+tmp/
+temp/
+tempdir/
+
+# Crash dumps & core files
+core
+core.*
+*.dump
+crash-*
+
+# ============================================================================
+# PROJECT-SPECIFIC EXCLUSIONS
+# ============================================================================
+
+# Original plan file (updated version maintained separately)
+plan.txt
+
+# Temporary/Draft documentation ONLY (NOT all markdown files!)
+*.tmp.md
+*.draft.md
+docs/TASK_*.md
+docs/SESSION_*.md
+docs/ITERATION_*.md
+docs/DELIVERABLES_*.md
+docs/CLI_QUICK_*.md
+IMPLEMENTATION_SUMMARY.md
+
+# Dynamic/Generated files
+GENERATED_*
+
+# Local configuration
+.env
+.env.local
+.env.*.local
+config.local.yaml
+
+# Release artifacts (keep these separate from source)
+releases/*.exe
+releases/*.tar.gz
+releases/*.zip
+releases/*.sha256
+
+# Development traces & profiles
+.trace-dev/
+profiles/
+
+# WHITELISTED - Build and installation scripts
+!scripts/
+!scripts/build-release.sh
+!scripts/install.sh
+
+# ============================================================================
+# CI/CD ARTIFACTS
+# ============================================================================
+
+# GitHub Actions
+.github/workflows/*.tmp
+.github/workflows/cache/
+
+# GitLab CI
+.gitlab-ci-local.yml
+.gitlab/
+
+# Jenkins
+.jenkins/
+Jenkinsfile.local
+
+# Circle CI
+.circleci/cache/
+
+# WHITELISTED - CI/CD workflow examples for reference
+!examples/
+!examples/github-actions.yml
+!examples/gitlab-ci.yml
+
+# ============================================================================
+# DOCUMENTATION & CORE FILES TO ALWAYS KEEP
+# ============================================================================
+
+# WHITELISTED - These files MUST be tracked and committed for the project
+
+# Core files (in root directory)
+!go.mod
+!README.md
+
+!LICENSE
+!Makefile
+!CONTRIBUTING.md
+
+
+# Documentation files in docs/ directory (ONLY the main ones)
+!docs/ARCHITECTURE.md
+!docs/DETECTION_RULES.md
+!docs/CICD_INTEGRATION.md
+
+# Exclude all other markdown files in docs/ unless explicitly whitelisted above
+docs/*.md
+*.md

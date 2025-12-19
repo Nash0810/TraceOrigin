@@ -1,0 +1,40 @@
+# Test Dockerfile for Node.js application with Supply Tracer
+
+FROM node:18-alpine
+
+WORKDIR /app
+
+# Install Supply Tracer and dependencies
+RUN apk add --no-cache \
+    curl \
+    bash
+
+RUN curl -sSL https://raw.githubusercontent.com/Nash0810/TraceOrigin/main/scripts/install.sh | bash
+
+# Copy package manifests
+COPY package.json package-lock.json ./
+
+# Trace dependency installation
+RUN tracer trace --output /app/trace.json --format json || true
+
+# Install dependencies (traced)
+RUN npm ci
+
+# Generate SBOM
+RUN tracer sbom /app/trace.json package.json \
+    --format=cyclonedx \
+    --output=/app/sbom.json || true
+
+# Validate SBOM
+RUN tracer validate /app/sbom.json --db=osv || true
+
+# Copy application
+COPY . .
+
+# Labels for testing
+LABEL test="true"
+LABEL tracer.scanned="true"
+LABEL application="nodejs"
+
+# Start application
+CMD ["npm", "start"]
