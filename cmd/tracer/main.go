@@ -1,6 +1,9 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -83,17 +86,109 @@ observed in the trace log. Detects version mismatches and potential attacks.`,
 			log.Fatalf("Failed to read trace log: %v", err)
 		}
 
-		// Parse events from trace log (line-delimited JSON)
+		// Create correlation engine
 		engine := correlator.NewCorrelationEngine()
-		var mismatchCount, verifiedCount int
+		
+		// Parse events from trace log (line-delimited JSON) and load into engine
+		scanner := bufio.NewScanner(bytes.NewReader(data))
+		eventCount := 0
+		
+		for scanner.Scan() {
+			line := scanner.Bytes()
+			if len(line) == 0 {
+				continue
+			}
 
-		// For MVP: simple analysis without re-parsing all events
-		// In production: replay events through correlation engine
-		lines := string(data)
-		fmt.Fprintf(os.Stderr, "\n[*] Parsed trace log (%d bytes)\n\n", len(lines))
+			// Peek at event type to determine structure
+			var baseEvent struct {
+				EventType  string `json:"event_type"`
+				PID        uint32 `json:"pid"`
+				CgroupID   uint64 `json:"cgroup_id"`
+				ContainerID string `json:"container_id"`
+				Timestamp  uint64 `json:"timestamp_ns"`
+			}
+			
+			if err := json.Unmarshal(line, &baseEvent); err != nil {
+				continue
+			}
+
+			// Dispatch to engine based on event type
+			switch baseEvent.EventType {
+			case "exec":
+				var e collector.ExecEvent
+				if err := json.Unmarshal(line, &e); err == nil {
+					engine.AddProcessEvent(e.PID, e.PPID, e.CgroupID, e.Comm, e.Argv)
+				}
+				
+			case "tcp_connect":
+				var e collector.NetEvent
+				if err := json.Unmarshal(line, &e); err == nil {
+					netEvent := &correlator.NetworkEvent{
+						PID:       e.PID,
+						Comm:      e.Comm,
+						SrcAddr:   e.SrcAddr,
+						DstAddr:   e.DstAddr,
+						DstPort:   e.DstPort,
+						Timestamp: e.Timestamp,
+						IsStart:   true,
+					}
+					engine.AddNetworkEvent(e.PID, netEvent)
+				}
+				
+			case "tcp_close":
+				var e collector.NetEvent
+				if err := json.Unmarshal(line, &e); err == nil {
+					netEvent := &correlator.NetworkEvent{
+						PID:       e.PID,
+						Comm:      e.Comm,
+						SrcAddr:   e.SrcAddr,
+						DstAddr:   e.DstAddr,
+						DstPort:   e.DstPort,
+						Timestamp: e.Timestamp,
+						IsStart:   false,
+					}
+					engine.AddNetworkEvent(e.PID, netEvent)
+				}
+				
+			case "log":
+				var e collector.LogEvent
+				if err := json.Unmarshal(line, &e); err == nil {
+					logEvent := &correlator.LogEvent{
+						PID:       e.PID,
+						Comm:      e.Comm,
+						FD:        e.FD,
+						LogData:   e.LogData,
+						Timestamp: e.Timestamp,
+					}
+					engine.AddLogEvent(e.PID, logEvent)
+				}
+				
+			case "http":
+				var e collector.HTTPEvent
+				if err := json.Unmarshal(line, &e); err == nil {
+					httpEvent := &correlator.HTTPEvent{
+						PID:       e.PID,
+						Comm:      e.Comm,
+						URL:       e.URL,
+						Host:      e.Host,
+						Method:    e.Method,
+						Timestamp: e.Timestamp,
+					}
+					engine.AddHTTPEvent(e.PID, httpEvent)
+				}
+			}
+			
+			eventCount++
+		}
+
+		// Parse events from trace log (line-delimited JSON)
+		fmt.Fprintf(os.Stderr, "\n[*] Loaded %d events from trace log (%d bytes)\n\n", eventCount, len(data))
 
 		// Link manifest to observations
 		linked := engine.LinkManifestToObserved(declaredPkgs)
+
+		// Count verification results
+		var mismatchCount, verifiedCount int
 
 		// Report results
 		fmt.Printf("=== Supply Chain Analysis Report ===\n\n")

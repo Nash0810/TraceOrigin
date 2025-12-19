@@ -12,6 +12,8 @@ import (
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/ringbuf"
+
+	"github.com/Nash0810/TraceOrigin/pkg/container"
 )
 
 // KernelEventType represents the type of event from eBPF kernel
@@ -32,6 +34,7 @@ type ExecEvent struct {
 	PID        uint32    `json:"pid"`
 	PPID       uint32    `json:"ppid"`
 	CgroupID   uint64    `json:"cgroup_id"`
+	ContainerID string   `json:"container_id"`
 	Comm       string    `json:"comm"`
 	Argv       string    `json:"argv"`
 	Timestamp  uint64    `json:"timestamp_ns"`
@@ -42,6 +45,7 @@ type ExecEvent struct {
 type NetEvent struct {
 	PID        uint32    `json:"pid"`
 	CgroupID   uint64    `json:"cgroup_id"`
+	ContainerID string   `json:"container_id"`
 	Comm       string    `json:"comm"`
 	SrcAddr    string    `json:"src_addr"`
 	DstAddr    string    `json:"dst_addr"`
@@ -55,6 +59,7 @@ type NetEvent struct {
 type FileEvent struct {
 	PID        uint32    `json:"pid"`
 	CgroupID   uint64    `json:"cgroup_id"`
+	ContainerID string   `json:"container_id"`
 	Comm       string    `json:"comm"`
 	Path       string    `json:"path"`
 	Flags      uint32    `json:"flags"`
@@ -66,6 +71,7 @@ type FileEvent struct {
 type LogEvent struct {
 	PID        uint32    `json:"pid"`
 	CgroupID   uint64    `json:"cgroup_id"`
+	ContainerID string   `json:"container_id"`
 	Comm       string    `json:"comm"`
 	FD         uint32    `json:"fd"`
 	LogData    string    `json:"log_data"`
@@ -78,6 +84,7 @@ type LogEvent struct {
 type HTTPEvent struct {
 	PID         uint32    `json:"pid"`
 	CgroupID    uint64    `json:"cgroup_id"`
+	ContainerID string    `json:"container_id"`
 	Comm        string    `json:"comm"`
 	URL         string    `json:"url"`
 	Host        string    `json:"host"`
@@ -104,6 +111,7 @@ type Collector struct {
 	objs    *objects
 	reader  *ringbuf.Reader
 	eventCh chan json.RawMessage
+	resolver *container.ContainerResolver
 }
 
 // IP address formatting helper
@@ -148,10 +156,11 @@ func NewCollector() (*Collector, error) {
 	}
 
 	return &Collector{
-		spec:    spec,
-		objs:    objs,
-		reader:  reader,
-		eventCh: make(chan json.RawMessage, 100),
+		spec:     spec,
+		objs:     objs,
+		reader:   reader,
+		eventCh:  make(chan json.RawMessage, 100),
+		resolver: container.NewContainerResolver(),
 	}, nil
 }
 
@@ -217,19 +226,19 @@ func (c *Collector) readEvents() {
 
 		switch eventType {
 		case 0:  // Exec event
-			jsonEvent, parseErr = parseExecEvent(payload)
+			jsonEvent, parseErr = c.parseExecEvent(payload)
 		case 1:  // Net connect
-			jsonEvent, parseErr = parseNetEvent(payload, "tcp_connect")
+			jsonEvent, parseErr = c.parseNetEvent(payload, "tcp_connect")
 		case 2:  // Net close
-			jsonEvent, parseErr = parseNetEvent(payload, "tcp_close")
+			jsonEvent, parseErr = c.parseNetEvent(payload, "tcp_close")
 		case 3:  // File open
-			jsonEvent, parseErr = parseFileEvent(payload, "file_open")
+			jsonEvent, parseErr = c.parseFileEvent(payload, "file_open")
 		case 4:  // File write
-			jsonEvent, parseErr = parseFileEvent(payload, "file_write")
+			jsonEvent, parseErr = c.parseFileEvent(payload, "file_write")
 		case 5:  // Log write
-			jsonEvent, parseErr = parseLogEvent(payload)
+			jsonEvent, parseErr = c.parseLogEvent(payload)
 		case 6:  // HTTP request
-			jsonEvent, parseErr = parseHTTPEvent(payload)
+			jsonEvent, parseErr = c.parseHTTPEvent(payload)
 		default:
 			continue
 		}
@@ -244,7 +253,7 @@ func (c *Collector) readEvents() {
 }
 
 // Parse exec event from raw bytes
-func parseExecEvent(data []byte) (json.RawMessage, error) {
+func (c *Collector) parseExecEvent(data []byte) (json.RawMessage, error) {
 	var event ExecEvent
 
 	buf := bytes.NewReader(data)
@@ -274,13 +283,16 @@ func parseExecEvent(data []byte) (json.RawMessage, error) {
 		return nil, err
 	}
 
+	// Resolve container ID LIVE while event is fresh
+	event.ContainerID = c.resolver.ResolveCgroupID(event.CgroupID)
+
 	event.EventType = "exec"
 
 	return json.Marshal(event)
 }
 
 // Parse network event from raw bytes
-func parseNetEvent(data []byte, eventType string) (json.RawMessage, error) {
+func (c *Collector) parseNetEvent(data []byte, eventType string) (json.RawMessage, error) {
 	var event NetEvent
 
 	buf := bytes.NewReader(data)
@@ -314,6 +326,9 @@ func parseNetEvent(data []byte, eventType string) (json.RawMessage, error) {
 		return nil, err
 	}
 
+	// Resolve container ID LIVE
+	event.ContainerID = c.resolver.ResolveCgroupID(event.CgroupID)
+
 	event.SrcAddr = formatIP(saddr)
 	event.DstAddr = formatIP(daddr)
 	event.EventType = eventType
@@ -322,7 +337,7 @@ func parseNetEvent(data []byte, eventType string) (json.RawMessage, error) {
 }
 
 // Parse file event from raw bytes
-func parseFileEvent(data []byte, eventType string) (json.RawMessage, error) {
+func (c *Collector) parseFileEvent(data []byte, eventType string) (json.RawMessage, error) {
 	var event FileEvent
 
 	buf := bytes.NewReader(data)
@@ -352,13 +367,16 @@ func parseFileEvent(data []byte, eventType string) (json.RawMessage, error) {
 		return nil, err
 	}
 
+	// Resolve container ID LIVE
+	event.ContainerID = c.resolver.ResolveCgroupID(event.CgroupID)
+
 	event.EventType = eventType
 
 	return json.Marshal(event)
 }
 
 // Parse log event from raw bytes
-func parseLogEvent(data []byte) (json.RawMessage, error) {
+func (c *Collector) parseLogEvent(data []byte) (json.RawMessage, error) {
 	var event LogEvent
 
 	buf := bytes.NewReader(data)
@@ -391,6 +409,9 @@ func parseLogEvent(data []byte) (json.RawMessage, error) {
 		return nil, err
 	}
 
+	// Resolve container ID LIVE
+	event.ContainerID = c.resolver.ResolveCgroupID(event.CgroupID)
+
 	// Trim to actual size
 	if event.LogSize < 256 {
 		event.LogData = cstrToString(logData[:event.LogSize])
@@ -404,7 +425,7 @@ func parseLogEvent(data []byte) (json.RawMessage, error) {
 }
 
 // Parse HTTP event from raw bytes
-func parseHTTPEvent(data []byte) (json.RawMessage, error) {
+func (c *Collector) parseHTTPEvent(data []byte) (json.RawMessage, error) {
 	var event HTTPEvent
 
 	buf := bytes.NewReader(data)
@@ -439,6 +460,9 @@ func parseHTTPEvent(data []byte) (json.RawMessage, error) {
 	if err := binary.Read(buf, binary.LittleEndian, &event.Method); err != nil {
 		return nil, err
 	}
+
+	// Resolve container ID LIVE
+	event.ContainerID = c.resolver.ResolveCgroupID(event.CgroupID)
 
 	event.EventType = "http"
 
