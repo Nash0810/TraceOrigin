@@ -24,7 +24,10 @@ struct exec_event {
 };
 
 /* eBPF Maps */
-BPF_PERF_OUTPUT(events);
+struct {
+	__uint(type, BPF_MAP_TYPE_RINGBUF);
+	__uint(max_entries, 32 * 1024);
+} events SEC(".maps");
 
 /* Tracked package managers */
 const char package_managers[][16] = {
@@ -112,7 +115,11 @@ int trace_execve(struct trace_event_raw_sys_enter *ctx) {
 	event->cgroup_id = cgroup_id;
 	event->timestamp_ns = bpf_ktime_get_ns();
 	
-	__builtin_memcpy(&event->comm, &comm, sizeof(comm));
+	/* Copy comm using manual loop instead of __builtin_memcpy */
+	#pragma unroll
+	for (int i = 0; i < COMM_LEN; i++) {
+		event->comm[i] = comm[i];
+	}
 
 	/* Get argv - Read from ctx->args[1] which points to argv array */
 	unsigned long argv_ptr = ctx->args[1];

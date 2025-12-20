@@ -1,8 +1,11 @@
 /* SPDX-License-Identifier: GPL-2.0 OR BSD-2-Clause */
 /* HTTP Parser - Captures HTTP requests to extract URLs
- * Hooks: kprobe/tcp_sendto for HTTP/1.1 requests
+ * Hooks: kprobe/tcp_sendmsg for HTTP/1.1 requests
  * Note: HTTPS traffic is encrypted; for MVP we capture from logs and heuristics
  */
+
+/* Target architecture for kprobes - MUST come before includes */
+#define __TARGET_ARCH_x86 1
 
 #include "vmlinux.h"
 #include <bpf/bpf_helpers.h>
@@ -25,8 +28,17 @@ struct http_event {
 };
 
 /* eBPF Maps */
-BPF_PERF_OUTPUT(events);
-BPF_HASH(tracked_pids, __u32, __u64);
+struct {
+	__uint(type, BPF_MAP_TYPE_RINGBUF);
+	__uint(max_entries, 32 * 1024);
+} events SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, __u32);
+	__type(value, __u64);
+	__uint(max_entries, 512);
+} tracked_pids SEC(".maps");
 
 /* HTTP method detection */
 static __always_inline __u32 detect_http_method(char *buf) {
@@ -109,17 +121,29 @@ int trace_http_send(struct pt_regs *ctx) {
 		if (url_len > HTTP_BUF_SIZE)
 			url_len = HTTP_BUF_SIZE;
 
-		__builtin_memcpy(event->url, temp_buf + url_start, url_len);
+		/* Manual copy instead of __builtin_memcpy */
+		#pragma unroll
+		for (int j = 0; j < HTTP_BUF_SIZE; j++) {
+			if (j >= url_len)
+				break;
+			event->url[j] = temp_buf[url_start + j];
+		}
 	}
 
 	/* Extract Host header (simplified - looks for "Host: " pattern) */
-	char *host_start = bpf_strstr(temp_buf, "Host: ");
-	if (host_start) {
-		int offset = 6;  // strlen("Host: ")
-		int i = 0;
-		while (i < 128 && offset + i < len && temp_buf[offset + i] != '\r') {
-			event->host[i] = temp_buf[offset + i];
-			i++;
+	/* Manual host search since bpf_strstr is not available */
+	#pragma unroll
+	for (int i = 0; i < len - 6 && i < HTTP_BUF_SIZE - 6; i++) {
+		if (temp_buf[i] == 'H' && temp_buf[i+1] == 'o' && 
+		    temp_buf[i+2] == 's' && temp_buf[i+3] == 't' &&
+		    temp_buf[i+4] == ':' && temp_buf[i+5] == ' ') {
+			int offset = i + 6;
+			int j = 0;
+			while (j < 127 && offset + j < len && temp_buf[offset + j] != '\r') {
+				event->host[j] = temp_buf[offset + j];
+				j++;
+			}
+			break;
 		}
 	}
 
@@ -128,13 +152,14 @@ int trace_http_send(struct pt_regs *ctx) {
 	return 0;
 }
 
-/* Hook: sched_process_exec - Track package managers */
-SEC("tp/sched/sched_process_exec")
-int track_pm_http(struct trace_event_raw_sched_process_exec *ctx) {
-	__u32 pid = ctx->pid;
+/* Hook: sys_enter_execve - Track package managers for HTTP */
+SEC("tracepoint/syscalls/sys_enter_execve")
+int track_pm_http(struct trace_event_raw_sys_enter *ctx) {
+	__u64 pid_tgid = bpf_get_current_pid_tgid();
+	__u32 pid = pid_tgid >> 32;
 
 	char comm[COMM_LEN] = {};
-	__builtin_memcpy(&comm, &ctx->comm, sizeof(comm));
+	bpf_get_current_comm(&comm, sizeof(comm));
 
 	/* Check if package manager */
 	if ((comm[0] == 'p' && comm[1] == 'i') ||   /* pip, pip3 */

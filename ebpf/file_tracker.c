@@ -37,13 +37,26 @@ struct log_event {
 };
 
 /* eBPF Maps */
-BPF_PERF_OUTPUT(events);
+struct {
+	__uint(type, BPF_MAP_TYPE_RINGBUF);
+	__uint(max_entries, 32 * 1024);
+} events SEC(".maps");
 
 /* Map to track active package manager PIDs */
-BPF_HASH(tracked_pids, __u32, __u64);
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, __u32);
+	__type(value, __u64);
+	__uint(max_entries, 512);
+} tracked_pids SEC(".maps");
 
 /* Map to buffer log lines per PID (for reassembly of split writes) */
-BPF_HASH(log_buffers, __u32, char[512]);
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, __u32);
+	__type(value, char[512]);
+	__uint(max_entries, 256);
+} log_buffers SEC(".maps");
 
 /* Hook: sys_enter_openat - Trace file creation */
 SEC("tracepoint/syscalls/sys_enter_openat")
@@ -126,14 +139,15 @@ int trace_write(struct trace_event_raw_sys_enter *ctx) {
 	return 0;
 }
 
-/* Hook: sched_process_exec - Track package managers */
-SEC("tp/sched/sched_process_exec")
-int track_package_manager(struct trace_event_raw_sched_process_exec *ctx) {
-	__u32 pid = ctx->pid;
+/* Hook: sys_enter_execve - Track package managers */
+SEC("tracepoint/syscalls/sys_enter_execve")
+int track_package_manager(struct trace_event_raw_sys_enter *ctx) {
+	__u64 pid_tgid = bpf_get_current_pid_tgid();
+	__u32 pid = pid_tgid >> 32;
 
 	/* Check if this is a package manager process */
 	char comm[COMM_LEN] = {};
-	__builtin_memcpy(&comm, &ctx->comm, sizeof(comm));
+	bpf_get_current_comm(&comm, sizeof(comm));
 
 	/* Quick package manager check */
 	if ((comm[0] == 'p' && comm[1] == 'i') ||   /* pip, pip3 */

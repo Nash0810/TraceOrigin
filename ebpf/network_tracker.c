@@ -3,6 +3,9 @@
  * Hooks: kprobe/tcp_v4_connect (start) and kprobe/tcp_close (end)
  */
 
+/* Target architecture for kprobes - MUST come before includes */
+#define __TARGET_ARCH_x86 1
+
 #include "vmlinux.h"
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
@@ -25,10 +28,18 @@ struct net_event {
 };
 
 /* eBPF Maps */
-BPF_PERF_OUTPUT(events);
+struct {
+	__uint(type, BPF_MAP_TYPE_RINGBUF);
+	__uint(max_entries, 32 * 1024);
+} events SEC(".maps");
 
 /* Map to track active package manager PIDs */
-BPF_HASH(tracked_pids, __u32, __u64);
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, __u32);
+	__type(value, __u64);
+	__uint(max_entries, 512);
+} tracked_pids SEC(".maps");
 
 /* Helper: IP address to string format (for debugging) */
 static __always_inline char *ip_to_str(__u32 ip) {
@@ -73,11 +84,12 @@ int trace_tcp_v4_connect(struct pt_regs *ctx) {
 	bpf_probe_read_kernel(&event->saddr, sizeof(__u32),
 			      &sk->__sk_common.skc_rcv_saddr);
 	bpf_probe_read_kernel(&event->sport, sizeof(__u16),
-			      &sk->__sk_common.skc_sport);
+			      &sk->__sk_common.skc_num);
 
 	/* Convert port from network byte order to host byte order */
-	event->dport = bpf_ntohs(event->dport);
-	event->sport = bpf_ntohs(event->sport);
+	/* Manual byte swap: ntohs(x) = ((x & 0xff) << 8) | ((x >> 8) & 0xff) */
+	event->dport = ((__u16)((__u16)event->dport << 8)) | (((__u16)event->dport >> 8) & 0xff);
+	event->sport = ((__u16)((__u16)event->sport << 8)) | (((__u16)event->sport >> 8) & 0xff);
 
 	bpf_ringbuf_submit(event, 0);
 
@@ -117,21 +129,23 @@ int trace_tcp_close(struct pt_regs *ctx) {
 	bpf_probe_read_kernel(&event->dport, sizeof(__u16),
 			      &sk->__sk_common.skc_dport);
 
-	event->dport = bpf_ntohs(event->dport);
+	/* Manual byte swap for port conversion */
+	event->dport = ((__u16)((__u16)event->dport << 8)) | (((__u16)event->dport >> 8) & 0xff);
 
 	bpf_ringbuf_submit(event, 0);
 
 	return 0;
 }
 
-/* Hook: sched_process_exec - Record package manager start for tracking */
-SEC("tp/sched/sched_process_exec")
-int trace_sched_exec(struct trace_event_raw_sched_process_exec *ctx) {
-	__u32 pid = ctx->pid;
+/* Hook: sys_enter_execve - Record package manager start for tracking */
+SEC("tracepoint/syscalls/sys_enter_execve")
+int trace_sched_exec(struct trace_event_raw_sys_enter *ctx) {
+	__u64 pid_tgid = bpf_get_current_pid_tgid();
+	__u32 pid = pid_tgid >> 32;
 
 	/* Check if this is a package manager process */
 	char comm[COMM_LEN] = {};
-	__builtin_memcpy(&comm, &ctx->comm, sizeof(comm));
+	bpf_get_current_comm(&comm, sizeof(comm));
 
 	/* Quick package manager check */
 	if ((comm[0] == 'p' && comm[1] == 'i') ||   /* pip, pip3 */

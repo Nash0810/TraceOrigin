@@ -8,6 +8,8 @@ VMLINUX_BTF ?= /sys/kernel/btf/vmlinux
 
 INCLUDES := -I/usr/include/bpf
 CFLAGS := -O2 -target bpf -D__KERNEL__ -D__BPF_TRACING__ $(INCLUDES)
+# Add -g to include debugging info (which includes BTF)
+CFLAGS += -g
 
 # Source files
 EBPF_SOURCES := $(wildcard *.c)
@@ -30,9 +32,8 @@ vmlinux.h:
 	fi
 
 %.o: %.c vmlinux.h
-	@echo "[*] Compiling $<..."
+	@echo "[*] Compiling $< with BTF..."
 	@$(CLANG) $(CFLAGS) -c $< -o $@
-	@$(STRIP) -g $@
 	@echo "[+] Built $@"
 
 clean:
@@ -47,3 +48,4 @@ help:
 	@echo "  clean     - Remove build artifacts"
 	@echo "  vmlinux.h - Generate vmlinux.h from kernel BTF"
 	@echo "  help      - Show this help"
+
