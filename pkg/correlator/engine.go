@@ -249,6 +249,12 @@ func (e *CorrelationEngine) AddLogEvent(pid uint32, event *LogEvent) {
 
 		// Keep incomplete line in buffer
 		e.logBuffers[pid] = lines[len(lines)-1]
+	} else {
+		// Also process log data directly as a potential complete log line (for synthetic events)
+		line := strings.TrimSpace(event.LogData)
+		if line != "" {
+			e.processLogLine(pid, line, event.Timestamp)
+		}
 	}
 }
 

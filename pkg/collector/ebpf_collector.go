@@ -401,7 +401,9 @@ func (c *Collector) readEvents() {
 // readSyntheticEvents generates demo/synthetic events for MVP testing
 // This allows testing the correlation and SBOM generation pipeline without real eBPF
 func (c *Collector) readSyntheticEvents() {
+	baseTime := time.Now().UnixNano()
 	syntheticEvents := []map[string]interface{}{
+		// Process execution: pip install
 		{
 			"event_type": "exec",
 			"pid": 1234,
@@ -409,30 +411,54 @@ func (c *Collector) readSyntheticEvents() {
 			"cgroup_id": 4294967296,
 			"container_id": "abc123def456",
 			"comm": "pip",
-			"argv": "pip install requests==2.28.0",
-			"timestamp_ns": time.Now().UnixNano(),
+			"argv": "pip install flask==2.3.0 requests==2.31.0 numpy==1.24.3",
+			"timestamp_ns": baseTime,
 		},
-		{
-			"event_type": "exec",
-			"pid": 1235,
-			"ppid": 1234,
-			"cgroup_id": 4294967296,
-			"container_id": "abc123def456",
-			"comm": "python",
-			"argv": "/usr/bin/python -m pip install requests",
-			"timestamp_ns": time.Now().UnixNano() + 1000000,
-		},
+		// Network connection to PyPI
 		{
 			"event_type": "tcp_connect",
-			"pid": 1235,
+			"pid": 1234,
 			"cgroup_id": 4294967296,
 			"container_id": "abc123def456",
 			"comm": "pip",
 			"src_addr": "172.17.0.2",
-			"dst_addr": "151.101.108.133",  // pypi.org
+			"dst_addr": "151.101.108.133",  // pythonhosted.org
 			"dst_port": 443,
 			"src_port": 54321,
-			"timestamp_ns": time.Now().UnixNano() + 2000000,
+			"timestamp_ns": baseTime + 1000000,
+		},
+		// Log: Successfully installed flask
+		{
+			"event_type": "log",
+			"pid": 1234,
+			"cgroup_id": 4294967296,
+			"container_id": "abc123def456",
+			"comm": "pip",
+			"fd": 1,
+			"log_data": "Successfully installed flask==2.3.0",
+			"timestamp_ns": baseTime + 2000000,
+		},
+		// Log: Successfully installed requests
+		{
+			"event_type": "log",
+			"pid": 1234,
+			"cgroup_id": 4294967296,
+			"container_id": "abc123def456",
+			"comm": "pip",
+			"fd": 1,
+			"log_data": "Successfully installed requests==2.31.0",
+			"timestamp_ns": baseTime + 3000000,
+		},
+		// Log: Successfully installed numpy
+		{
+			"event_type": "log",
+			"pid": 1234,
+			"cgroup_id": 4294967296,
+			"container_id": "abc123def456",
+			"comm": "pip",
+			"fd": 1,
+			"log_data": "Successfully installed numpy==1.24.3",
+			"timestamp_ns": baseTime + 4000000,
 		},
 	}
 
