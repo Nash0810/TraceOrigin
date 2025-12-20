@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	"github.com/Nash0810/TraceOrigin/pkg/collector"
 	"github.com/Nash0810/TraceOrigin/pkg/correlator"
@@ -275,8 +276,68 @@ traced package installations and manifest files.`,
 		lines := string(data)
 		fmt.Fprintf(os.Stderr, "\n[*] Processing trace log (%d bytes)\n", len(lines))
 
-		// Create dummy chains for demonstration
-		// In production: replay events through correlation engine
+		// Replay events through correlation engine
+		for _, line := range strings.Split(lines, "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+
+			var rawEvent json.RawMessage
+			if err := json.Unmarshal([]byte(line), &rawEvent); err != nil {
+				continue
+			}
+
+			// Parse event type and dispatch
+			var eventMap map[string]interface{}
+			if err := json.Unmarshal(rawEvent, &eventMap); err != nil {
+				continue
+			}
+
+			eventType, ok := eventMap["event_type"].(string)
+			if !ok {
+				continue
+			}
+
+			// Feed event to engine based on type
+			switch eventType {
+			case "exec":
+				var evt collector.ExecEvent
+				if err := json.Unmarshal(rawEvent, &evt); err == nil {
+					engine.AddProcessEvent(evt.PID, evt.PPID, evt.CgroupID, evt.Comm, evt.Argv)
+				}
+			case "tcp_connect":
+				var evt collector.NetEvent
+				if err := json.Unmarshal(rawEvent, &evt); err == nil {
+					// NetEvent tracks outbound connections
+				}
+			case "log":
+				var evt collector.LogEvent
+				if err := json.Unmarshal(rawEvent, &evt); err == nil {
+					// Convert to correlator.LogEvent
+					logEvt := &correlator.LogEvent{
+						PID:       evt.PID,
+						Comm:      evt.Comm,
+						FD:        evt.FD,
+						LogData:   evt.LogData,
+						Timestamp: evt.Timestamp,
+					}
+					engine.AddLogEvent(evt.PID, logEvt)
+				}
+			case "http":
+				var evt collector.HTTPEvent
+				if err := json.Unmarshal(rawEvent, &evt); err == nil {
+					// HTTPEvent for API tracking
+				}
+			case "file":
+				var evt collector.FileEvent
+				if err := json.Unmarshal(rawEvent, &evt); err == nil {
+					// FileEvent for manifest detection
+				}
+			}
+		}
+
+		// Get dependency chains from engine after processing all events
 		chains := engine.GetDependencyChains()
 
 		// Parse manifest for version comparison
