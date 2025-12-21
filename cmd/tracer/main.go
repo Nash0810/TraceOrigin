@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/Nash0810/TraceOrigin/pkg/anomaly"
 	"github.com/Nash0810/TraceOrigin/pkg/collector"
 	"github.com/Nash0810/TraceOrigin/pkg/correlator"
 	"github.com/Nash0810/TraceOrigin/pkg/manifest"
@@ -227,6 +228,46 @@ observed in the trace log. Detects version mismatches and potential attacks.`,
 		fmt.Printf("\nVerification Results:\n")
 		fmt.Printf("  Verified: %d\n", verifiedCount)
 		fmt.Printf("  Mismatches: %d\n", mismatchCount)
+
+		// Anomaly Detection
+		detector := anomaly.NewAnomalyDetector()
+
+		// Add dependency chains to detector
+		for _, chain := range engine.GetDependencyChains() {
+			detector.AddChain(&chain)
+		}
+
+		// Add declared packages to detector
+		for _, pkg := range man.Packages {
+			declaredPkg := &manifest.DeclaredPackage{
+				Name:    pkg.Name,
+				Version: pkg.Version,
+			}
+			detector.AddDeclaredPackage(declaredPkg)
+		}
+
+		// Detect anomalies
+		anomalies := detector.DetectAnomalies()
+
+		if len(anomalies) > 0 {
+			fmt.Printf("\n=== Security Anomalies Detected ===\n")
+			for _, anom := range anomalies {
+				severityEmoji := "⚠️"
+				if anom.Severity == "critical" {
+					severityEmoji = "🔴"
+				} else if anom.Severity == "high" {
+					severityEmoji = "🟠"
+				}
+				
+				fmt.Printf("%s %s (%s): %s\n", severityEmoji, anom.PackageName, anom.Severity, anom.Description)
+				fmt.Printf("   Confidence: %.1f%% | Threat Score: %.1f\n", 
+					anom.Confidence*100, anom.ThreatScore)
+				
+				if anom.Remediation != "" {
+					fmt.Printf("   Remediation: %s\n", anom.Remediation)
+				}
+			}
+		}
 
 		if detectTypo {
 			fmt.Printf("\nTyposquatting Detection: enabled\n")

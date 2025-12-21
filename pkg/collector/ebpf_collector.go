@@ -400,9 +400,14 @@ func (c *Collector) readEvents() {
 
 // readSyntheticEvents generates demo/synthetic events for MVP testing
 // This allows testing the correlation and SBOM generation pipeline without real eBPF
+// Now supports multiple package managers: pip, npm, go, bundle
 func (c *Collector) readSyntheticEvents() {
 	baseTime := time.Now().UnixNano()
 	syntheticEvents := []map[string]interface{}{
+		// ═══════════════════════════════════════════════════════════
+		// PYTHON: pip install
+		// ═══════════════════════════════════════════════════════════
+		
 		// Process execution: pip install
 		{
 			"event_type": "exec",
@@ -459,6 +464,170 @@ func (c *Collector) readSyntheticEvents() {
 			"fd": 1,
 			"log_data": "Successfully installed numpy==1.24.3",
 			"timestamp_ns": baseTime + 4000000,
+		},
+
+		// ═══════════════════════════════════════════════════════════
+		// NODEJS: npm install
+		// ═══════════════════════════════════════════════════════════
+
+		// Process execution: npm install
+		{
+			"event_type": "exec",
+			"pid": 1235,
+			"ppid": 1001,
+			"cgroup_id": 4294967297,
+			"container_id": "def456ghi789",
+			"comm": "npm",
+			"argv": "npm install express@4.18.0 axios@1.4.0 lodash@4.17.21",
+			"timestamp_ns": baseTime + 5000000,
+		},
+		// Network connection to npm registry
+		{
+			"event_type": "tcp_connect",
+			"pid": 1235,
+			"cgroup_id": 4294967297,
+			"container_id": "def456ghi789",
+			"comm": "npm",
+			"src_addr": "172.17.0.3",
+			"dst_addr": "151.101.1.225",  // registry.npmjs.org
+			"dst_port": 443,
+			"src_port": 54322,
+			"timestamp_ns": baseTime + 6000000,
+		},
+		// Log: added express
+		{
+			"event_type": "log",
+			"pid": 1235,
+			"cgroup_id": 4294967297,
+			"container_id": "def456ghi789",
+			"comm": "npm",
+			"fd": 1,
+			"log_data": "added express@4.18.0",
+			"timestamp_ns": baseTime + 7000000,
+		},
+		// Log: added axios
+		{
+			"event_type": "log",
+			"pid": 1235,
+			"cgroup_id": 4294967297,
+			"container_id": "def456ghi789",
+			"comm": "npm",
+			"fd": 1,
+			"log_data": "added axios@1.4.0",
+			"timestamp_ns": baseTime + 8000000,
+		},
+		// Log: added lodash
+		{
+			"event_type": "log",
+			"pid": 1235,
+			"cgroup_id": 4294967297,
+			"container_id": "def456ghi789",
+			"comm": "npm",
+			"fd": 1,
+			"log_data": "added lodash@4.17.21",
+			"timestamp_ns": baseTime + 9000000,
+		},
+
+		// ═══════════════════════════════════════════════════════════
+		// GO: go get
+		// ═══════════════════════════════════════════════════════════
+
+		// Process execution: go get
+		{
+			"event_type": "exec",
+			"pid": 1236,
+			"ppid": 1002,
+			"cgroup_id": 4294967298,
+			"container_id": "ghi789jkl012",
+			"comm": "go",
+			"argv": "go get github.com/gin-gonic/gin@v1.9.1 github.com/sirupsen/logrus@v1.9.3",
+			"timestamp_ns": baseTime + 10000000,
+		},
+		// Network connection to proxy.golang.org
+		{
+			"event_type": "tcp_connect",
+			"pid": 1236,
+			"cgroup_id": 4294967298,
+			"container_id": "ghi789jkl012",
+			"comm": "go",
+			"src_addr": "172.17.0.4",
+			"dst_addr": "142.251.41.14",  // proxy.golang.org
+			"dst_port": 443,
+			"src_port": 54323,
+			"timestamp_ns": baseTime + 11000000,
+		},
+		// Log: go module gin-gonic/gin
+		{
+			"event_type": "log",
+			"pid": 1236,
+			"cgroup_id": 4294967298,
+			"container_id": "ghi789jkl012",
+			"comm": "go",
+			"fd": 1,
+			"log_data": "go: added github.com/gin-gonic/gin v1.9.1",
+			"timestamp_ns": baseTime + 12000000,
+		},
+		// Log: go module logrus
+		{
+			"event_type": "log",
+			"pid": 1236,
+			"cgroup_id": 4294967298,
+			"container_id": "ghi789jkl012",
+			"comm": "go",
+			"fd": 1,
+			"log_data": "go: added github.com/sirupsen/logrus v1.9.3",
+			"timestamp_ns": baseTime + 13000000,
+		},
+
+		// ═══════════════════════════════════════════════════════════
+		// RUBY: bundle install
+		// ═══════════════════════════════════════════════════════════
+
+		// Process execution: bundle install
+		{
+			"event_type": "exec",
+			"pid": 1237,
+			"ppid": 1003,
+			"cgroup_id": 4294967299,
+			"container_id": "jkl012mno345",
+			"comm": "bundle",
+			"argv": "bundle install",
+			"timestamp_ns": baseTime + 14000000,
+		},
+		// Network connection to rubygems.org
+		{
+			"event_type": "tcp_connect",
+			"pid": 1237,
+			"cgroup_id": 4294967299,
+			"container_id": "jkl012mno345",
+			"comm": "bundle",
+			"src_addr": "172.17.0.5",
+			"dst_addr": "151.101.193.70",  // rubygems.org
+			"dst_port": 443,
+			"src_port": 54324,
+			"timestamp_ns": baseTime + 15000000,
+		},
+		// Log: Successfully installed nokogiri
+		{
+			"event_type": "log",
+			"pid": 1237,
+			"cgroup_id": 4294967299,
+			"container_id": "jkl012mno345",
+			"comm": "bundle",
+			"fd": 1,
+			"log_data": "Successfully installed nokogiri-1.14.0",
+			"timestamp_ns": baseTime + 16000000,
+		},
+		// Log: Successfully installed rails
+		{
+			"event_type": "log",
+			"pid": 1237,
+			"cgroup_id": 4294967299,
+			"container_id": "jkl012mno345",
+			"comm": "bundle",
+			"fd": 1,
+			"log_data": "Successfully installed rails-7.0.4",
+			"timestamp_ns": baseTime + 17000000,
 		},
 	}
 

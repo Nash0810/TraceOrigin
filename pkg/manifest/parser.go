@@ -158,8 +158,9 @@ func parseGoMod(path string) (*Manifest, error) {
 	}
 	defer file.Close()
 
-	// Regex: require module.name v1.2.3 or require (...)
-	re := regexp.MustCompile(`require\s+([^\s]+)\s+v?([^\s]+)`)
+	// Regex patterns
+	singleLineRe := regexp.MustCompile(`require\s+([^\s]+)\s+v?([^\s]+)`)
+	requireBlockRe := regexp.MustCompile(`^\s*([^\s]+)\s+v?([^\s]+)`)
 
 	scanner := bufio.NewScanner(file)
 	inRequire := false
@@ -182,7 +183,29 @@ func parseGoMod(path string) (*Manifest, error) {
 			continue
 		}
 
-		matches := re.FindStringSubmatch(line)
+		// If in require block, parse lines with just module name and version
+		if inRequire {
+			matches := requireBlockRe.FindStringSubmatch(line)
+			if len(matches) >= 3 {
+				// Skip indirect comments
+				if strings.Contains(matches[0], "//") {
+					parts := strings.Split(matches[0], "//")
+					matches = requireBlockRe.FindStringSubmatch(strings.TrimSpace(parts[0]))
+					if len(matches) < 3 {
+						continue
+					}
+				}
+				pkg := DeclaredPackage{
+					Name:    matches[1],
+					Version: matches[2],
+				}
+				manifest.Packages = append(manifest.Packages, pkg)
+			}
+			continue
+		}
+
+		// Parse single-line require statements
+		matches := singleLineRe.FindStringSubmatch(line)
 		if len(matches) >= 3 {
 			pkg := DeclaredPackage{
 				Name:    matches[1],

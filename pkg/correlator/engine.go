@@ -90,6 +90,8 @@ type CorrelationEngine struct {
 	pythonRegex map[string]*regexp.Regexp
 	npmRegex    map[string]*regexp.Regexp
 	aptRegex    map[string]*regexp.Regexp
+	goRegex     map[string]*regexp.Regexp
+	rubyRegex   map[string]*regexp.Regexp
 }
 
 // NewCorrelationEngine creates a new correlation engine
@@ -106,6 +108,8 @@ func NewCorrelationEngine() *CorrelationEngine {
 		pythonRegex:       make(map[string]*regexp.Regexp),
 		npmRegex:          make(map[string]*regexp.Regexp),
 		aptRegex:          make(map[string]*regexp.Regexp),
+		goRegex:           make(map[string]*regexp.Regexp),
+		rubyRegex:         make(map[string]*regexp.Regexp),
 	}
 
 	// Compile regex patterns for log parsing
@@ -121,9 +125,9 @@ func NewCorrelationEngine() *CorrelationEngine {
 	engine.npmRegex["added"] = regexp.MustCompile(
 		`added\s+(\d+)\s+packages`)
 
-	// NPM: "npm notice" or package listings
+	// NPM: "added package@version" or "npm notice package@version"
 	engine.npmRegex["package"] = regexp.MustCompile(
-		`([a-z0-9-]+)@([0-9]+\.[0-9]+(?:\.[0-9]+)?)`)
+		`(?:added|installed)\s+([a-z0-9\-@/._]+)@([0-9]+\.[0-9]+(?:\.[0-9]+)?)`)
 
 	// APT: "Setting up package (1.2.3-ubuntu1)"
 	engine.aptRegex["setup"] = regexp.MustCompile(
@@ -132,6 +136,19 @@ func NewCorrelationEngine() *CorrelationEngine {
 	// APT: "Unpacking package (1.2.3)"
 	engine.aptRegex["unpack"] = regexp.MustCompile(
 		`Unpacking\s+([^\s:]+)\s+\(([^)]+)\)`)
+
+	// Go: "go: added github.com/package-name v1.2.3"
+	engine.goRegex["added"] = regexp.MustCompile(
+		`go:\s+added\s+([a-zA-Z0-9\-./]+)\s+v([0-9]+\.[0-9]+(?:\.[0-9]+)?)`)
+
+	// Ruby: "Successfully installed gem-name-1.2.3"
+	engine.rubyRegex["installed"] = regexp.MustCompile(
+		`Successfully installed\s+([a-zA-Z0-9\-_]+)-([0-9]+\.[0-9]+(?:\.[0-9]+)?)`)
+
+	// Ruby: "Installing gem-name-1.2.3"
+	engine.rubyRegex["installing"] = regexp.MustCompile(
+		`Installing\s+([a-zA-Z0-9\-_]+)-([0-9]+\.[0-9]+(?:\.[0-9]+)?)`)
+
 
 	return engine
 }
@@ -275,6 +292,10 @@ func (e *CorrelationEngine) processLogLine(pid uint32, line string, timestamp ui
 		chain = e.parseNpmLog(line, ctx, timestamp)
 	case strings.Contains(ctx.Comm, "apt"):
 		chain = e.parseAptLog(line, ctx, timestamp)
+	case strings.Contains(ctx.Comm, "go"):
+		chain = e.parseGoLog(line, ctx, timestamp)
+	case strings.Contains(ctx.Comm, "bundle"):
+		chain = e.parseRubyLog(line, ctx, timestamp)
 	}
 
 	if chain != nil {
@@ -373,6 +394,63 @@ func (e *CorrelationEngine) parseAptLog(line string, ctx *ProcessContext, timest
 	return nil
 }
 
+// parseGoLog extracts package info from go get output
+func (e *CorrelationEngine) parseGoLog(line string, ctx *ProcessContext, timestamp uint64) *DependencyChain {
+	// Try added pattern: "go: added github.com/package-name v1.2.3"
+	matches := e.goRegex["added"].FindStringSubmatch(line)
+	if len(matches) >= 3 {
+		chain := &DependencyChain{
+			PackageName:    matches[1],
+			ActualVersion:  matches[2],
+			PackageManager: "go",
+			DownloadTime:   time.Unix(0, int64(timestamp)),
+			LogEntry:       line,
+			Verified:       true,
+		}
+		// Link with network connection using time window lookup
+		chain.DownloadIP = e.findMatchingConnection(ctx.PID, timestamp)
+		return chain
+	}
+
+	return nil
+}
+
+// parseRubyLog extracts package info from bundle install output
+func (e *CorrelationEngine) parseRubyLog(line string, ctx *ProcessContext, timestamp uint64) *DependencyChain {
+	// Try installed pattern: "Successfully installed gem-name-1.2.3"
+	matches := e.rubyRegex["installed"].FindStringSubmatch(line)
+	if len(matches) >= 3 {
+		chain := &DependencyChain{
+			PackageName:    matches[1],
+			ActualVersion:  matches[2],
+			PackageManager: "ruby",
+			DownloadTime:   time.Unix(0, int64(timestamp)),
+			LogEntry:       line,
+			Verified:       true,
+		}
+		// Link with network connection using time window lookup
+		chain.DownloadIP = e.findMatchingConnection(ctx.PID, timestamp)
+		return chain
+	}
+
+	// Try installing pattern: "Installing gem-name-1.2.3"
+	matches = e.rubyRegex["installing"].FindStringSubmatch(line)
+	if len(matches) >= 3 {
+		chain := &DependencyChain{
+			PackageName:    matches[1],
+			ActualVersion:  matches[2],
+			PackageManager: "ruby",
+			DownloadTime:   time.Unix(0, int64(timestamp)),
+			LogEntry:       line,
+		}
+		// Link with network connection using time window lookup
+		chain.DownloadIP = e.findMatchingConnection(ctx.PID, timestamp)
+		return chain
+	}
+
+	return nil
+}
+
 // findMatchingConnection looks up a network connection that was active at a given timestamp
 // Uses a 5-second time window to match log events with network connections
 func (e *CorrelationEngine) findMatchingConnection(pid uint32, logTime uint64) string {
@@ -450,12 +528,13 @@ func VersionConstraintSatisfied(constraint, actual string) bool {
 func (e *CorrelationEngine) LinkManifestToObserved(declaredPackages map[string]string) map[string]*DependencyChain {
 	result := make(map[string]*DependencyChain)
 
-	for _, chain := range e.dependencyChains {
+	for i := range e.dependencyChains {
+		chain := &e.dependencyChains[i]
 		declaredVersion, exists := declaredPackages[chain.PackageName]
 		if exists {
 			chain.DeclaredVersion = declaredVersion
 			chain.Verified = VersionConstraintSatisfied(declaredVersion, chain.ActualVersion)
-			result[chain.PackageName] = &chain
+			result[chain.PackageName] = chain
 		}
 	}
 
