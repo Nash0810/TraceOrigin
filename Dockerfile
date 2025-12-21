@@ -8,9 +8,9 @@ RUN apk add --no-cache \
     clang \
     llvm \
     linux-headers \
-    libelf-dev \
+    libelf \
     zlib-dev \
-    pkg-config
+    pkgconfig
 
 WORKDIR /build
 
@@ -24,39 +24,30 @@ RUN go mod download
 COPY . .
 
 # Build the CLI binary
-RUN CGO_ENABLED=1 GOOS=linux go build -o tracer ./cmd/tracer
+RUN CGO_ENABLED=1 GOOS=linux go build -o supply-tracer ./cmd/tracer
 
 # Final stage - runtime image
-FROM ubuntu:22.04
+FROM alpine:latest
 
 # Install runtime dependencies
-RUN apt-get update && apt-get install -y \
-    libelf1 \
-    zlib1g \
+RUN apk add --no-cache \
+    libelf \
+    zlib \
     curl \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
-# Create app user
-RUN useradd -m -u 1000 tracer
-
-WORKDIR /app
+    ca-certificates
 
 # Copy binary from builder
-COPY --from=builder /build/tracer /usr/local/bin/tracer
+COPY --from=builder /build/supply-tracer /usr/local/bin/supply-tracer
 
 # Copy docs for reference
 COPY --from=builder /build/docs ./docs
 COPY --from=builder /build/README.md .
 
 # Give executable permissions
-RUN chmod +x /usr/local/bin/tracer
+RUN chmod +x /usr/local/bin/supply-tracer
 
-# Switch to app user
-USER tracer
-
-# Default command
-ENTRYPOINT ["tracer"]
+# Set entrypoint and default command
+ENTRYPOINT ["/usr/local/bin/supply-tracer"]
 CMD ["--help"]
 
 # Labels for container metadata
